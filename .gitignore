@@ -1,0 +1,7 @@
+/render
+/prep
+/data/
+/docs/engine.wasm
+*.ppm
+*.pam
+.DS_Store

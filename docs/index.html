@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spectral-pixels</title>
+<meta name="description" content="逐波长计算的 2D 像素打光：真实光源光谱乘以建材反射率，C 写的引擎编译为 WebAssembly。">
+<link rel="stylesheet" href="demo.css">
+<style>
+  :root {
+    --text-color: #34343c;
+    --text-muted-color: #6b6b73;
+    --main-border-color: #e3e6ea;
+    --card-bg: #fff;
+    --page-bg: #f6f7f9;
+    --link: #3b5fc0;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --text-color: #d6d6dc;
+      --text-muted-color: #9a9aa3;
+      --main-border-color: #33353b;
+      --card-bg: #1e1f23;
+      --page-bg: #151619;
+      --link: #8fa8ec;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0;
+    background: var(--page-bg);
+    color: var(--text-color);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+  }
+  main { max-width: 800px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; letter-spacing: 0.01em; }
+  .lead { margin: 0 0 18px; color: var(--text-muted-color); }
+  a { color: var(--link); }
+  footer { margin-top: 18px; font-size: 0.85rem; color: var(--text-muted-color); }
+</style>
+</head>
+<body>
+<main>
+  <h1>spectral-pixels</h1>
+  <p class="lead">逐波长计算的 2D 像素打光：真实光源光谱 × 建材光谱反射率。引擎以 C 编写，编译为 WebAssembly。</p>
+  <div class="spl-demo" data-base="./">交互演示需要启用 JavaScript。</div>
+  <footer>
+    源码与说明：<a href="https://github.com/FinnChou/spectral-pixels">github.com/FinnChou/spectral-pixels</a>
+    · 博客：<a href="https://finnchou.github.io/">Finn's blog</a>
+  </footer>
+</main>
+<script src="demo.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+/*
+ * demo.css — styles of the spectral lighting demo
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 FinnZhou
+ *
+ * Interface colours follow the CSS variables of the host page if it defines them (--card-bg,
+ * --text-color, --text-muted-color, --main-border-color, as in the Jekyll theme Chirpy), with light-mode
+ * fallbacks. The frame, swatches and light colours are computed by the engine and do not follow the theme.
+ */
+.spl-demo {
+  --spl-text: var(--text-color, #34343c);
+  --spl-muted: var(--text-muted-color, #757575);
+  --spl-line: var(--main-border-color, #e3e6ea);
+  --spl-bg: var(--card-bg, #fff);
+  --spl-accent: #4a6fd1;
+  --spl-main: #c0703a;
+  --spl-joint: #8a8f98;
+  --spl-grid: rgba(127, 127, 127, 0.2);
+  --spl-label-w: 2.6rem;                /* width of the labels on the left */
+  --spl-label-gap: 0.6rem;
+  border: 1px solid var(--spl-line);
+  border-radius: 10px;
+  background: var(--spl-bg);
+  color: var(--spl-text);
+  padding: 0.9rem 1rem 0.7rem;
+  margin: 1.2rem 0 1.6rem;
+  font-size: 0.92rem;
+}
+html[data-mode='dark'] .spl-demo { --spl-accent: #8aa4f0; --spl-main: #e0965f; --spl-joint: #a3a8b2; }
+@media (prefers-color-scheme: dark) {
+  html:not([data-mode='light']) .spl-demo { --spl-accent: #8aa4f0; --spl-main: #e0965f; --spl-joint: #a3a8b2; }
+}
+
+/* ---- Frame ---- */
+.spl-stage { position: relative; border-radius: 6px; overflow: hidden; background: #0d0c10; }
+.spl-stage:focus-within { box-shadow: 0 0 0 2px var(--spl-accent); }
+/* touches on the canvas walk the dot instead of scrolling the page */
+.spl-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; cursor: crosshair; touch-action: none; }
+.spl-canvas:focus { outline: none; }
+.spl-tag, .spl-focus {
+  position: absolute; bottom: 0.55rem; padding: 0.15rem 0.6rem; border-radius: 999px;
+  background: rgba(13, 12, 16, 0.62); color: #f1eee8; font-size: 0.78rem; pointer-events: none;
+}
+.spl-tag { left: 0.6rem; }
+.spl-tag-dot { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; margin-right: 0.35rem; }
+.spl-sep { margin: 0 0.45rem; opacity: 0.55; }
+.spl-focus { right: 0.6rem; white-space: nowrap; transition: opacity 0.2s; }
+.spl-stage:focus-within .spl-focus { opacity: 0; }
+@media (hover: none) { .spl-focus { display: none; } }   /* touch devices usually have no keyboard */
+
+/* ---- Help ---- */
+.spl-help {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem 1rem;
+  margin: 0.55rem 0 0.9rem; padding: 0.45rem 0.7rem; border-radius: 8px; background: rgba(127, 127, 127, 0.07);
+}
+.spl-help-item { display: flex; align-items: center; gap: 0.5rem; min-width: 0; font-size: 0.78rem; color: var(--spl-muted); }
+.spl-help-item b { flex: none; font-weight: 600; color: var(--spl-text); }
+.spl-help kbd {
+  display: inline-block; min-width: 1.25rem; padding: 0 0.2rem; margin-right: 0.12rem; border-radius: 4px;
+  border: 1px solid var(--spl-line); border-bottom-width: 2px; background: var(--spl-bg); box-shadow: none;
+  color: var(--spl-text); font: 600 0.7rem/1.35 ui-monospace, monospace; text-align: center;
+}
+
+/* ---- Options: lamp, view, materials ---- */
+.spl-pick { display: flex; align-items: flex-start; gap: var(--spl-label-gap); margin: 0 0 0.6rem; }
+.spl-pick-title { flex: 0 0 var(--spl-label-w); padding-top: 0.9rem; color: var(--spl-muted); font-size: 0.82rem; }
+.spl-pick-row { flex: 1; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0.35rem; }
+.spl-lamps { grid-template-columns: repeat(auto-fit, minmax(3.7rem, 1fr)); }
+.spl-windows { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.spl-materials[hidden] { display: none; }
+.spl-materials-box { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.spl-opt, .spl-tab {
+  min-width: 0; border-radius: 8px; border: 1px solid var(--spl-line); background: transparent; color: var(--spl-text);
+  cursor: pointer; transition: border-color 0.15s, background-color 0.15s, transform 0.15s;
+}
+.spl-opt { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 0.4rem 0.15rem 0.3rem; }
+.spl-opt:hover, .spl-tab:hover { border-color: var(--spl-accent); }
+.spl-opt:hover { transform: translateY(-1px); }
+.spl-opt[aria-pressed='true'], .spl-tab[aria-selected='true'] {
+  border-color: var(--spl-accent); background: rgba(127, 127, 127, 0.09); box-shadow: inset 0 0 0 1px var(--spl-accent);
+}
+.spl-opt-name { max-width: 100%; font-size: 0.72rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spl-ico { width: 32px; height: 32px; image-rendering: pixelated; }
+.spl-opt[aria-pressed='true'] .spl-ico { filter: drop-shadow(0 0 5px var(--spl-glow, transparent)); }
+.spl-swatch, .spl-view { border-radius: 4px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.spl-view { width: 48px; height: 24px; }
+.spl-tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.35rem; }
+.spl-tab { display: flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.45rem; text-align: left; }
+.spl-tab-swatch .spl-swatch { display: block; width: 22px; height: 22px; }
+.spl-tab-text { display: flex; flex-direction: column; min-width: 0; font-size: 0.8rem; font-weight: 600; line-height: 1.25; }
+.spl-tab-text small { font-size: 0.7rem; font-weight: 400; color: var(--spl-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Sliders ---- */
+.spl-sliders {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3rem 1.4rem;
+  margin: 0.2rem 0 0.4rem calc(var(--spl-label-w) + var(--spl-label-gap));
+}
+.spl-slider { display: flex; align-items: center; gap: 0.6rem; margin: 0; font-size: 0.82rem; color: var(--spl-muted); }
+.spl-slider input { flex: 1; min-width: 0; accent-color: var(--spl-accent); }
+.spl-slider output { min-width: 3.4rem; text-align: right; font-weight: 500; color: var(--spl-text); font-variant-numeric: tabular-nums; }
+
+/* ---- Charts ---- */
+.spl-charts {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem 1rem;
+  margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px dashed var(--spl-line);
+}
+.spl-fig { margin: 0; min-width: 0; }
+.spl-fig-title { margin-bottom: 0.15rem; font-size: 0.82rem; font-weight: 600; }
+.spl-fig figcaption { margin-top: 0.1rem; font-size: 0.74rem; line-height: 1.5; color: var(--spl-muted); }
+.spl-chart { display: block; width: 100%; height: auto; }
+.spl-chart .spl-grid { stroke: var(--spl-grid); stroke-width: 1; }
+.spl-chart .spl-tick { fill: var(--spl-muted); font-size: 10px; }
+.spl-chart .spl-curve { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.spl-chart .spl-area { stroke: none; opacity: 0.9; }
+.spl-chart .spl-lamp { stroke: var(--spl-text); stroke-width: 1.2; }
+.spl-chart .spl-win { stroke: var(--spl-accent); stroke-width: 1.6; stroke-dasharray: 5 3; }
+.spl-chart .spl-main { stroke: var(--spl-main); }
+.spl-chart .spl-joint { stroke: var(--spl-joint); stroke-dasharray: 4 3; }
+.spl-chart .spl-in { stroke: var(--spl-text); }
+.spl-chart .spl-out { stroke: var(--spl-muted); stroke-width: 1; }
+.spl-leg { display: inline-block; width: 1.1rem; height: 0; margin-right: 0.3rem; vertical-align: 0.25em; border-top: 2px solid var(--spl-text); }
+.spl-leg.spl-main { border-color: var(--spl-main); }
+.spl-leg.spl-joint { border-top-style: dashed; border-color: var(--spl-joint); }
+.spl-leg.spl-win { border-top-style: dashed; border-color: var(--spl-accent); }
+.spl-sw { display: inline-block; width: 1.1rem; height: 0.7rem; margin-right: 0.3rem; vertical-align: -1px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.4); }
+.spl-credit { margin: 0.6rem 0 0; font-size: 0.72rem; color: var(--spl-muted); }
+
+@media (max-width: 640px) {
+  .spl-help, .spl-charts, .spl-sliders { grid-template-columns: minmax(0, 1fr); }
+  .spl-sliders { margin-left: 0; }
+  .spl-pick { flex-direction: column; gap: 0.3rem; }
+  .spl-pick-title { flex: none; padding-top: 0; }
+  .spl-pick-row, .spl-lamps { grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; }
+  .spl-windows, .spl-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
