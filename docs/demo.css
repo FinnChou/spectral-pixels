@@ -48,6 +48,16 @@ html[data-mode='dark'] .spl-demo { --spl-accent: #8aa4f0; --spl-main: #e0965f; -
 .spl-focus { right: 0.6rem; white-space: nowrap; transition: opacity 0.2s; }
 .spl-stage:focus-within .spl-focus { opacity: 0; }
 @media (hover: none) { .spl-focus { display: none; } }   /* touch devices usually have no keyboard */
+.spl-lang {
+  position: absolute; top: 0.55rem; right: 0.6rem; display: flex; gap: 0.1rem; padding: 0.12rem;
+  border-radius: 999px; background: rgba(13, 12, 16, 0.62);
+}
+.spl-lang button {
+  border: 0; border-radius: 999px; padding: 0.08rem 0.55rem; background: transparent; color: rgba(241, 238, 232, 0.7);
+  font-size: 0.72rem; line-height: 1.5; cursor: pointer;
+}
+.spl-lang button:hover { color: #f1eee8; }
+.spl-lang button[aria-pressed='true'] { background: rgba(241, 238, 232, 0.18); color: #f1eee8; }
 
 /* ---- Help ---- */
 .spl-help {
@@ -133,4 +143,7 @@ html[data-mode='dark'] .spl-demo { --spl-accent: #8aa4f0; --spl-main: #e0965f; -
   .spl-pick-title { flex: none; padding-top: 0; }
   .spl-pick-row, .spl-lamps { grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; }
   .spl-windows, .spl-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* narrow buttons: let longer names (English, Japanese) wrap instead of being cut off */
+  .spl-opt-name, .spl-tab-text small { white-space: normal; text-align: center; hyphens: auto; }
+  .spl-tab-text small { text-align: left; }
 }

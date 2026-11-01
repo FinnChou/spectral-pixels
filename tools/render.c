@@ -39,8 +39,8 @@ static void fail(const char *msg, const char *detail) {
   exit(1);
 }
 
-/* Data file: lines starting with # are comments; every other line holds an id, an English name, a
- * Chinese name and LIGHT_NW values, separated by tabs. */
+/* Data file: lines starting with # are comments; every other line holds an id, the English, Chinese and
+ * Japanese names and LIGHT_NW values, separated by tabs. */
 static void load(const char *path) {
   FILE *f = fopen(path, "r");
   if (!f) { perror(path); exit(1); }
@@ -49,8 +49,10 @@ static void load(const char *path) {
     if (!strchr(line, '\n') && !feof(f)) fail("line too long in ", path);
     if (line[0] == '#' || line[0] == '\n') continue;
     if (spectrum_count == MAX_SPECTRA) fail("too many spectra in ", path);
-    char *id = strtok(line, "\t"), *name_en = strtok(NULL, "\t"), *name_zh = strtok(NULL, "\t");
-    if (!id || !name_en || !name_zh) fail("malformed line in ", path);
+    char *id = strtok(line, "\t");
+    for (int k = 0; k < 3; k++)                   /* skip the three names */
+      if (!strtok(NULL, "\t")) fail("malformed line in ", path);
+    if (!id) fail("malformed line in ", path);
     snprintf(spectra[spectrum_count].id, sizeof spectra[0].id, "%s", id);
     for (int k = 0; k < LIGHT_NW; k++) {
       char *tok = strtok(NULL, "\t\n"), *end;

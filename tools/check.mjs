@@ -27,9 +27,9 @@ const spectra = {};
 for (const file of DATA)
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line || line.startsWith('#')) continue;
-    const field = line.split('\t');                // id, English name, Chinese name, values
-    if (field.length !== 3 + NW || field.slice(3).some((v) => v === '' || !Number.isFinite(+v))) throw new Error(`malformed line: ${field[0]}`);
-    spectra[field[0]] = Float32Array.from(field.slice(3), Number);
+    const field = line.split('\t');                // id, English, Chinese and Japanese names, values
+    if (field.length !== 4 + NW || field.slice(4).some((v) => v === '' || !Number.isFinite(+v))) throw new Error(`malformed line: ${field[0]}`);
+    spectra[field[0]] = Float32Array.from(field.slice(4), Number);
   }
 
 function put(slot, id) {                        // copies a spectrum into the engine's scratch area; returns its address

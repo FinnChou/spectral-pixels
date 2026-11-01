@@ -23,6 +23,7 @@
 - 窗外可选晴天阳光、阴天、晴天背阴、高压钠路灯，或者关窗。窗洞作为面光源，在地上投出窗格的影子。
 - 地板、墙、石柱、木箱、木桶、窗框的材料都可以换，共 20 种 KLUM 实测建材。
 - 指针移到哪里，就显示那里材料的反射率，以及照到那一点的光谱和反射出来的光谱。
+- 界面有中文、英文、日文三种，在画面右上角切换。
 
 ## 引擎
 
@@ -178,7 +179,8 @@ CIE 数据表的目录见 <https://cie.co.at/data-tables>。
 ```
 
 `data-base` 指向 `engine.wasm` 与两个数据文件所在的目录。`engine.wasm` 需先用 `make` 编译，也可以直接取在线演示里的
-<https://finnchou.github.io/spectral-pixels/engine.wasm>。界面文字为中文。界面颜色跟随宿主页面的 CSS 变量
+<https://finnchou.github.io/spectral-pixels/engine.wasm>。界面有中文、英文、日文三种，默认中文，画面右上角可以切换；
+`data-lang="en"` 或 `data-lang="ja"` 可让界面以英文或日文开始。界面颜色跟随宿主页面的 CSS 变量
 （`--card-bg`、`--text-color`、`--text-muted-color`、`--main-border-color`），没有这些变量时使用浅色的后备值。
 
 ## 许可

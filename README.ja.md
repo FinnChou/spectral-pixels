@@ -25,7 +25,7 @@
 - 床、壁、石柱、木箱、樽、窓枠の材料は、KLUM で実測された 20 種類の建材から選べる。
 - ポインタを置いた場所の材料の反射率と、その点に届く光および反射される光のスペクトルを表示する。
 
-デモの UI は中国語である。
+デモの UI は中国語・英語・日本語に対応し、画面の右上で切り替えられる。
 
 ## エンジン
 
@@ -184,7 +184,7 @@ CIE データ表の一覧は <https://cie.co.at/data-tables> にある。
 ```
 
 `data-base` には `engine.wasm` と 2 つのデータファイルがあるディレクトリを指定する。`engine.wasm` は `make` でビルドするか、
-オンラインデモが配信しているもの（<https://finnchou.github.io/spectral-pixels/engine.wasm>）を使う。UI の色はホストページの CSS 変数
+オンラインデモが配信しているもの（<https://finnchou.github.io/spectral-pixels/engine.wasm>）を使う。UI は中国語で始まり、`data-lang="en"` か `data-lang="ja"` を指定すると英語か日本語で始まる。UI の色はホストページの CSS 変数
 （`--card-bg`、`--text-color`、`--text-muted-color`、`--main-border-color`）に従い、定義がなければライトテーマの値を使う。
 
 ## ライセンス

@@ -14,7 +14,9 @@
  *   <script src="<base>/demo.js" defer></script>
  * data-base is the directory that holds engine.wasm, illuminants.txt and reflectances.txt, with a
  * trailing slash; without it the directory of the page is used.
- * The interface text is in Chinese.
+ * The interface is in Chinese (default), English or Japanese, chosen with the switch in the corner of the
+ * frame; data-lang="en" or "ja" on the element selects another starting language. The choice made with
+ * the switch is remembered in localStorage.
  */
 (() => {
   'use strict';
@@ -31,65 +33,132 @@
     ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0],
   };
 
+  // ---------------------------------------------------------------- Languages
+  // Interface languages in the order of the switch; the first is the default. T() holds one text in all
+  // of them; '{}' marks where a value is inserted.
+  const LANGS = ['zh', 'en', 'ja'];
+  const LANG_NAMES = { zh: '中文', en: 'English', ja: '日本語' };
+  const HTML_LANG = { zh: 'zh-CN', en: 'en', ja: 'ja' };
+  const LANG_KEY = 'spectral-pixels-lang';
+  const T = (zh, en, ja) => ({ zh, en, ja });
+  const UI = {
+    scene: T('光谱打光的场景。获得焦点后可用方向键或 WASD 移动小点',
+      'Spectrally lit scene. When it has focus, move the dot with the arrow keys or WASD',
+      '分光ライティングの場面。フォーカス中は矢印キーか WASD で点を動かせる'),
+    focus: T('点一下画面，就能用键盘走动', 'Click the scene to walk with the keyboard', '画面をクリックするとキーボードで歩ける'),
+    walk: T('走动', 'Walk', '移動'),
+    arrows: T(' 或方向键', ' or arrow keys', ' か矢印キー'),
+    hold: T('点按', 'Hold', '長押し'),
+    holdText: T('按住画面，小点朝指针走', 'Hold the pointer down to walk towards it', '押したままにすると点がポインタへ歩く'),
+    look: T('查看', 'Inspect', '表示'),
+    lookText: T('指针移到哪里，就看哪里的光谱', 'Point anywhere to see the spectra there', 'ポインタの位置のスペクトルを表示'),
+    language: T('界面语言', 'Interface language', '表示言語'),
+    lamp: T('提灯', 'Lamp', 'ランプ'),
+    window: T('窗外', 'Window', '窓の外'),
+    materials: T('材料', 'Materials', '素材'),
+    shutters: T('关上百叶窗', 'Shutters closed', 'よろい戸を閉めた状態'),
+    brightness: T('提灯亮度', 'Lamp brightness', 'ランプの明るさ'),
+    exposure: T('曝光', 'Exposure', '露出'),
+    lightChart: T('光源的相对光谱功率分布', 'Relative spectral power distributions of the lights', '光源の相対分光分布'),
+    reflChart: T('材料的光谱反射率', 'Spectral reflectance of the material', '素材の分光反射率'),
+    probeChart: T('一点的入射光谱与反射光谱', 'Incident and reflected spectra at one point', '1 点の入射スペクトルと反射スペクトル'),
+    lightTitle: T('光源的光谱', 'Light spectra', '光源のスペクトル'),
+    reflTitle: T('{}的反射率', 'Reflectance: {}', '{}の反射率'),
+    outside: T('窗外', 'Outside', '窓の外'),
+    outsideText: T('窗洞处显示窗外景色，不是屋内的表面。', 'The opening shows the view outside, not a surface in the room.',
+      '窓には外の景色が見えている。室内の面ではない。'),
+    probePointer: T('指针所指的光谱', 'Spectra at the pointer', 'ポインタ位置のスペクトル'),
+    probeDot: T('小点脚下的光谱', 'Spectra at the dot', '点の足元のスペクトル'),
+    lampOf: T('提灯：{}', 'Lamp: {}', 'ランプ：{}'),
+    windowOf: T('窗外：{}', 'Window: {}', '窓の外：{}'),
+    perPeak: T('各自按峰值归一', 'Each scaled to its peak', 'それぞれのピークで正規化'),
+    incident: T('照到这里的光', 'Light arriving here', 'ここに届く光'),
+    reflected: T('反射出来的光（以入射光的峰值归一）', 'Reflected light (scaled to the peak of the incident light)',
+      '反射される光（入射光のピークで正規化）'),
+    license: T('许可：', ' License: ', 'ライセンス：'),
+    end: T('。', '. ', '。'),
+    axis: T('横轴为波长（nm）。', 'Horizontal axes: wavelength (nm).', '横軸は波長（nm）。'),
+    badLine: T('数据行格式错误：{}', 'malformed data line: {}', 'データ行の形式が正しくない：{}'),
+    missing: T('数据中缺少：{}', 'missing from the data: {}', 'データにない：{}'),
+    failed: T('演示加载失败：{}', 'The demo could not be loaded: {}', 'デモを読み込めなかった：{}'),
+  };
+  const fill = (text, value) => text.replace('{}', value);
+
+  // Starting language: the one chosen earlier with the switch, else data-lang, else the default.
+  function startLang(root) {
+    let saved = null;
+    try { saved = localStorage.getItem(LANG_KEY); } catch (e) { /* storage unavailable */ }
+    return [saved, root.dataset.lang].find((l) => LANGS.includes(l)) || LANGS[0];
+  }
+
   // ---------------------------------------------------------------- Lights, views and materials
 
   // Lamps the dot can carry. flicker: relative amplitude of the brightness variation and the frequencies
   // (Hz) it is made of; sway: amplitude of the flame's motion, in scene pixels.
   const LAMPS = [
-    { id: 'planck-1900', label: '蜡烛', icon: 'candle', flicker: { amp: 0.1, hz: [1.1, 2.3, 4.7, 9.1] }, sway: 0.5 },
-    { id: 'cie-a', label: '白炽灯', icon: 'bulb', flicker: { amp: 0.05, hz: [0.7, 1.9, 3.7] } },
-    { id: 'cie-hp1', label: '高压钠灯', icon: 'street', flicker: { amp: 0.06, hz: [0.4, 1.3, 2.9] } },
-    { id: 'cie-fl7', label: '日光色灯管', icon: 'tube', flicker: { amp: 0.04, hz: [0.8, 2.7, 5.3] } },
-    { id: 'cie-fl11', label: '三基色灯管', icon: 'tube', flicker: { amp: 0.04, hz: [0.9, 2.9, 6.1] } },
-    { id: 'cie-led-b4', label: '白光 LED', icon: 'led', flicker: { amp: 0.025, hz: [0.6, 1.3, 3.1] } },
-    { id: 'cie-led-b5', label: '冷白 LED', icon: 'torch', flicker: { amp: 0.025, hz: [0.6, 1.3, 3.1] } },
-    { id: 'cie-led-rgb1', label: 'RGB LED', icon: 'rgb', flicker: { amp: 0.025, hz: [0.6, 1.3, 3.1] } },
+    { id: 'planck-1900', label: T('蜡烛', 'Candle', 'ろうそく'), icon: 'candle', flicker: { amp: 0.1, hz: [1.1, 2.3, 4.7, 9.1] }, sway: 0.5 },
+    { id: 'cie-a', label: T('白炽灯', 'Incan\u00addescent', '白熱電球'), icon: 'bulb', flicker: { amp: 0.05, hz: [0.7, 1.9, 3.7] } },
+    { id: 'cie-hp1', label: T('高压钠灯', 'Sodium', 'ナトリウム灯'), icon: 'street', flicker: { amp: 0.06, hz: [0.4, 1.3, 2.9] } },
+    { id: 'cie-fl7', label: T('日光色灯管', 'Daylight tube', '昼光色蛍光灯'), icon: 'tube', flicker: { amp: 0.04, hz: [0.8, 2.7, 5.3] } },
+    { id: 'cie-fl11', label: T('三基色灯管', 'Tri-band tube', '三波長蛍光灯'), icon: 'tube', flicker: { amp: 0.04, hz: [0.9, 2.9, 6.1] } },
+    { id: 'cie-led-b4', label: T('白光 LED', 'White LED', '昼白色 LED'), icon: 'led', flicker: { amp: 0.025, hz: [0.6, 1.3, 3.1] } },
+    { id: 'cie-led-b5', label: T('冷白 LED', 'Cool LED', '昼光色 LED'), icon: 'torch', flicker: { amp: 0.025, hz: [0.6, 1.3, 3.1] } },
+    { id: 'cie-led-rgb1', label: T('RGB LED', 'RGB LED', 'RGB LED'), icon: 'rgb', flicker: { amp: 0.025, hz: [0.6, 1.3, 3.1] } },
   ];
 
   // Views outside the window. Their lights use engine lights 1, 2, …: sun is a directional light (dir points
   // towards the sun), window is skylight with the opening as an area light, point is a point light outside.
   // The daytime views lower the base exposure by 1 EV, as a camera's automatic exposure would.
   const WINDOWS = [
-    { label: '关窗', view: 'closed', ev: 0, lights: [] },
-    { label: '晴天阳光', view: 'sun', ev: -1, flicker: { amp: 0.08, hz: [0.15, 0.33] }, lights: [
+    { label: T('关窗', 'Closed', '閉める'), view: 'closed', ev: 0, lights: [] },
+    { label: T('晴天阳光', 'Sunlight', '日差し'), view: 'sun', ev: -1, flicker: { amp: 0.08, hz: [0.15, 0.33] }, lights: [
       { kind: 'sun', spd: 'cie-d55', dir: [0.35, -0.85, 0.45], strength: 36 },
       { kind: 'window', spd: 'cie-daylight-10000', strength: 40 }] },
-    { label: '阴天', view: 'overcast', ev: -1, flicker: { amp: 0.06, hz: [0.12, 0.29] }, lights: [
+    { label: T('阴天', 'Overcast', '曇り'), view: 'overcast', ev: -1, flicker: { amp: 0.06, hz: [0.12, 0.29] }, lights: [
       { kind: 'window', spd: 'cie-d75', strength: 50 }] },
-    { label: '晴天背阴', view: 'sky', ev: -1, flicker: { amp: 0.05, hz: [0.1, 0.23] }, lights: [
+    { label: T('晴天背阴', 'Clear sky', '晴天の日陰'), view: 'sky', ev: -1, flicker: { amp: 0.05, hz: [0.1, 0.23] }, lights: [
       { kind: 'window', spd: 'cie-daylight-10000', strength: 60 }] },
-    { label: '高压钠路灯', view: 'night', ev: 0, flicker: { amp: 0.06, hz: [0.5, 1.4, 3.1] }, lights: [
+    { label: T('高压钠路灯', 'Street lamp', '街灯'), view: 'night', ev: 0, flicker: { amp: 0.06, hz: [0.5, 1.4, 3.1] }, lights: [
       { kind: 'point', spd: 'cie-hp1', at: [132, -40, 44], strength: 30000 }] },
   ];
 
   // Materials. Parts are in the order of PART_* in scene.h; pick is the initial choice; style is a texture
   // style from scene.h.
   const WOODS = [
-    { label: '浅色清漆木', main: 'KLUM-L002' }, { label: '深色清漆木', main: 'KLUM-L001' },
-    { label: '绿漆木', main: 'KLUM-L102' }, { label: '蓝漆木', main: 'KLUM-L105' },
+    { label: T('浅色清漆木', 'Light varnish', 'ニス塗り・明'), main: 'KLUM-L002' },
+    { label: T('深色清漆木', 'Dark varnish', 'ニス塗り・暗'), main: 'KLUM-L001' },
+    { label: T('绿漆木', 'Green paint', '緑の塗装'), main: 'KLUM-L102' },
+    { label: T('蓝漆木', 'Blue paint', '青の塗装'), main: 'KLUM-L105' },
   ];
   const PARTS = [
-    { name: '地板', pick: 2, options: [
-      { label: '浅色木地板', main: 'KLUM-L002', style: 0 }, { label: '深色木地板', main: 'KLUM-L001', style: 0 },
-      { label: '红砖', main: 'KLUM-B002', joint: 'KLUM-C001', style: 1 },
-      { label: '陶土方砖', main: 'KLUM-D301', joint: 'KLUM-C001', style: 2 },
-      { label: '白色石灰岩', main: 'KLUM-G002', style: 3 },
-      { label: '黄色砂岩', main: 'KLUM-J106', joint: 'KLUM-C001', style: 4 },
-      { label: '红色花岗岩', main: 'KLUM-F103', style: 5 }, { label: '灰色混凝土', main: 'KLUM-E405', style: 6 }] },
-    { name: '墙', pick: 0, options: [
-      { label: '粗面石灰岩', main: 'KLUM-G001', joint: 'KLUM-C001', style: 0 },
-      { label: '灰色砾岩', main: 'KLUM-K004', joint: 'KLUM-C001', style: 0 },
-      { label: '红砖', main: 'KLUM-B002', joint: 'KLUM-C001', style: 1 },
-      { label: '米色砖', main: 'KLUM-B103', joint: 'KLUM-C001', style: 1 },
-      { label: '白色灰泥', main: 'KLUM-I201', style: 2 }, { label: '米色灰泥', main: 'KLUM-I203', style: 2 },
-      { label: '粉红灰泥', main: 'KLUM-I101', style: 2 }, { label: '浅色混凝土', main: 'KLUM-E301', style: 3 }] },
-    { name: '石柱', pick: 0, options: [
-      { label: '白色石灰岩', main: 'KLUM-G002', style: 0 }, { label: '红色砂岩', main: 'KLUM-J003', style: 0 },
-      { label: '灰色砾岩', main: 'KLUM-K004', style: 0 }, { label: '浅色混凝土', main: 'KLUM-E301', style: 0 },
-      { label: '红色花岗岩', main: 'KLUM-F103', style: 1 }, { label: '灰色花岗岩', main: 'KLUM-F004', style: 1 }] },
-    { name: '木箱', pick: 0, options: WOODS.map((w) => ({ ...w, style: 0 })) },
-    { name: '木桶', pick: 0, options: WOODS.map((w) => ({ ...w, style: 0 })) },
-    { name: '窗框', pick: 1, options: WOODS.map((w) => ({ ...w, style: 0 })) },
+    { name: T('地板', 'Floor', '床'), pick: 2, options: [
+      { label: T('浅色木地板', 'Light wood', '明るい木'), main: 'KLUM-L002', style: 0 },
+      { label: T('深色木地板', 'Dark wood', '暗い木'), main: 'KLUM-L001', style: 0 },
+      { label: T('红砖', 'Red brick', '赤レンガ'), main: 'KLUM-B002', joint: 'KLUM-C001', style: 1 },
+      { label: T('陶土方砖', 'Clay tile', '陶製タイル'), main: 'KLUM-D301', joint: 'KLUM-C001', style: 2 },
+      { label: T('白色石灰岩', 'Limestone', '白い石灰岩'), main: 'KLUM-G002', style: 3 },
+      { label: T('黄色砂岩', 'Sandstone', '黄色い砂岩'), main: 'KLUM-J106', joint: 'KLUM-C001', style: 4 },
+      { label: T('红色花岗岩', 'Red granite', '赤い花崗岩'), main: 'KLUM-F103', style: 5 },
+      { label: T('灰色混凝土', 'Grey concrete', 'コンクリート'), main: 'KLUM-E405', style: 6 }] },
+    { name: T('墙', 'Walls', '壁'), pick: 0, options: [
+      { label: T('粗面石灰岩', 'Limestone', '粗面の石灰岩'), main: 'KLUM-G001', joint: 'KLUM-C001', style: 0 },
+      { label: T('灰色砾岩', 'Conglo\u00admerate', '礫岩'), main: 'KLUM-K004', joint: 'KLUM-C001', style: 0 },
+      { label: T('红砖', 'Red brick', '赤レンガ'), main: 'KLUM-B002', joint: 'KLUM-C001', style: 1 },
+      { label: T('米色砖', 'Beige brick', 'ベージュレンガ'), main: 'KLUM-B103', joint: 'KLUM-C001', style: 1 },
+      { label: T('白色灰泥', 'White plaster', '白い塗り壁'), main: 'KLUM-I201', style: 2 },
+      { label: T('米色灰泥', 'Beige plaster', '砂色の塗り壁'), main: 'KLUM-I203', style: 2 },
+      { label: T('粉红灰泥', 'Pink plaster', 'ピンク塗り壁'), main: 'KLUM-I101', style: 2 },
+      { label: T('浅色混凝土', 'Concrete', 'コンクリート'), main: 'KLUM-E301', style: 3 }] },
+    { name: T('石柱', 'Pillars', '石柱'), pick: 0, options: [
+      { label: T('白色石灰岩', 'Limestone', '白い石灰岩'), main: 'KLUM-G002', style: 0 },
+      { label: T('红色砂岩', 'Sandstone', '赤い砂岩'), main: 'KLUM-J003', style: 0 },
+      { label: T('灰色砾岩', 'Conglo\u00admerate', '礫岩'), main: 'KLUM-K004', style: 0 },
+      { label: T('浅色混凝土', 'Concrete', 'コンクリート'), main: 'KLUM-E301', style: 0 },
+      { label: T('红色花岗岩', 'Red granite', '赤い花崗岩'), main: 'KLUM-F103', style: 1 },
+      { label: T('灰色花岗岩', 'Grey granite', '灰色の花崗岩'), main: 'KLUM-F004', style: 1 }] },
+    { name: T('木箱', 'Crates', '木箱'), pick: 0, options: WOODS.map((w) => ({ ...w, style: 0 })) },
+    { name: T('木桶', 'Barrels', '樽'), pick: 0, options: WOODS.map((w) => ({ ...w, style: 0 })) },
+    { name: T('窗框', 'Frame', '窓枠'), pick: 1, options: WOODS.map((w) => ({ ...w, style: 0 })) },
   ];
 
   // ---------------------------------------------------------------- Pixel-art icons (16 × 16)
@@ -320,12 +389,11 @@
   // Spectral chart (SVG): the grid is drawn once, afterwards only the curves are updated.
   const CHART = { w: 300, h: 140, left: 30, right: 8, top: 8, bottom: 118 };
   const SVG = 'http://www.w3.org/2000/svg';
-  function makeChart(nw, label) {
+  function makeChart(nw) {
     const svg = document.createElementNS(SVG, 'svg');
     svg.setAttribute('viewBox', `0 0 ${CHART.w} ${CHART.h}`);
     svg.setAttribute('class', 'spl-chart');
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', label);
     const x = (i) => CHART.left + (CHART.w - CHART.left - CHART.right) * i / (nw - 1);
     const y = (v) => CHART.bottom - (CHART.bottom - CHART.top) * Math.min(v, 1.04);
     const add = (tag, attrs, text) => {
@@ -370,27 +438,29 @@
     'GPL-2.0-only': { name: 'GPL-2.0', href: 'GPL-2.0.txt' },
   };
 
-  // Data file: lines starting with # are comments, "#!zh" gives the attribution in Chinese and the SPDX
-  // line the license; every other line holds an id, an English name, a Chinese name and nw values,
-  // separated by tabs.
-  function parseData(text, into, nw) {
-    let credit = '', license = null;
+  // Data file: lines starting with # are comments; "#!en", "#!zh" and "#!ja" lines give the attribution
+  // in each language and the SPDX line the license. Every other line holds an id, the English, Chinese
+  // and Japanese names and nw values, separated by tabs.
+  function parseData(text, into, nw, lang) {
+    const credit = {};
+    let license = null;
     for (const line of text.split('\n')) {
-      if (line.startsWith('#!zh ')) credit = line.slice(5).trim();
+      const m = /^#!(\w+) (.*)$/.exec(line);
+      if (m) credit[m[1]] = m[2].trim();
       else if (line.startsWith('# SPDX-License-Identifier:')) license = LICENSES[line.split(':')[1].trim()];
       else if (line && !line.startsWith('#')) {
         const f = line.split('\t');
-        if (f.length !== 3 + nw || f.slice(3).some((v) => v === '' || !Number.isFinite(+v))) throw new Error(`数据行格式错误：${f[0]}`);
-        into[f[0]] = { name: f[2], v: Float32Array.from(f.slice(3), Number) };
+        if (f.length !== 4 + nw || f.slice(4).some((v) => v === '' || !Number.isFinite(+v))) throw new Error(fill(UI.badLine[lang], f[0]));
+        into[f[0]] = { names: { en: f[1], zh: f[2], ja: f[3] }, v: Float32Array.from(f.slice(4), Number) };
       }
     }
     return { credit, license };
   }
 
-  async function load(base) {
+  async function load(base, lang) {
     const get = async (name) => {
       const r = await fetch(new URL(name, base));
-      if (!r.ok) throw new Error(`${name}：HTTP ${r.status}`);
+      if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
       return r;
     };
     const [wasm, illuminants, reflectances] = await Promise.all([
@@ -401,19 +471,23 @@
     const engine = wasm.instance.exports;
     engine._initialize();
     const nw = engine.light_spectrum_size(), spectra = {};
-    const credits = [parseData(illuminants, spectra, nw), parseData(reflectances, spectra, nw)];
+    const credits = [parseData(illuminants, spectra, nw, lang), parseData(reflectances, spectra, nw, lang)];
     const needed = [...LAMPS.map((l) => l.id), ...WINDOWS.flatMap((w) => w.lights.map((l) => l.spd)), 'cie-d65',
                     ...PARTS.flatMap((p) => p.options.flatMap((o) => [o.main, o.joint].filter(Boolean)))];
     const missing = [...new Set(needed.filter((id) => !spectra[id]))];
-    if (missing.length) throw new Error(`数据中缺少：${missing.join('、')}`);
+    if (missing.length) throw new Error(fill(UI.missing[lang], missing.join(', ')));
     return { engine, spectra, credits };
   }
 
   // ---------------------------------------------------------------- Demo
 
   let instances = 0;                                              // makes element ids unique per demo
-  function mount(root, base, { engine: E, spectra, credits }) {
+  function mount(root, base, lang, { engine: E, spectra, credits }) {
     const uid = `spl${++instances}`;
+    const tr = (text) => text[lang];
+    const nameOf = (id) => spectra[id].names[lang];
+    const relabel = [];                                           // functions that write the texts of the current language
+    const bind = (fn) => { relabel.push(fn); fn(); };
     const W = E.light_width(), H = E.light_height(), NW = E.light_spectrum_size();
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const phase = Array.from({ length: 8 }, () => Math.random() * 2 * Math.PI);
@@ -426,7 +500,7 @@
     const rgbOf = (id) => Array.from(new Uint8Array(E.memory.buffer, E.light_source_rgb(put(0, spectra[id].v)), 3));
 
     const state = { lamp: 0, window: 1, intensity: 1, ev: 0, me: { x: 88, y: 104 } };
-    const lamps = LAMPS.map((L) => ({ ...L, name: spectra[L.id].name, rgb: rgbOf(L.id), shape: peak(spectra[L.id].v) }));
+    const lamps = LAMPS.map((L) => ({ ...L, rgb: rgbOf(L.id), shape: peak(spectra[L.id].v) }));
     const windows = WINDOWS.map((w) => ({
       ...w, lights: w.lights.map((L) => ({ ...L, rgb: rgbOf(L.spd), shape: peak(spectra[L.spd].v) })),
     }));
@@ -474,22 +548,38 @@
 
     // ---- Frame
     root.replaceChildren();
-    const canvas = el('canvas', { class: 'spl-canvas', tabindex: '0', role: 'img',
-      'aria-label': '光谱打光的场景。获得焦点后可用方向键或 WASD 移动小点' });
+    const canvas = el('canvas', { class: 'spl-canvas', tabindex: '0', role: 'img' });
     canvas.width = W * SCALE;
     canvas.height = H * SCALE;
+    bind(() => canvas.setAttribute('aria-label', tr(UI.scene)));
     const tag = el('div', { class: 'spl-tag', 'aria-hidden': 'true' });
-    const stage = el('div', { class: 'spl-stage' }, canvas, tag, el('div', { class: 'spl-focus', text: '点一下画面，就能用键盘走动' }));
+    const focusHint = el('div', { class: 'spl-focus' });
+    bind(() => { focusHint.textContent = tr(UI.focus); });
+    const langSwitch = el('div', { class: 'spl-lang', role: 'group' });
+    const langButtons = LANGS.map((l) => {
+      const b = el('button', { type: 'button', lang: HTML_LANG[l], text: LANG_NAMES[l] });
+      b.addEventListener('click', () => setLang(l));
+      langSwitch.append(b);
+      return b;
+    });
+    bind(() => {
+      langSwitch.setAttribute('aria-label', tr(UI.language));
+      langButtons.forEach((b, k) => b.setAttribute('aria-pressed', String(LANGS[k] === lang)));
+    });
+    const stage = el('div', { class: 'spl-stage' }, canvas, tag, focusHint, langSwitch);
+    const text = (t) => { const e = el('span'); bind(() => { e.textContent = tr(t); }); return e; };
     const help = el('div', { class: 'spl-help' },
-      el('div', { class: 'spl-help-item' }, el('b', { text: '走动' }),
-        el('span', {}, ...['W', 'A', 'S', 'D'].map((k) => el('kbd', { text: k })), ' 或方向键')),
-      el('div', { class: 'spl-help-item' }, el('b', { text: '点按' }), el('span', { text: '按住画面，小点朝指针走' })),
-      el('div', { class: 'spl-help-item' }, el('b', { text: '查看' }), el('span', { text: '指针移到哪里，就看哪里的光谱' })));
+      el('div', { class: 'spl-help-item' }, el('b', {}, text(UI.walk)),
+        el('span', {}, ...['W', 'A', 'S', 'D'].map((k) => el('kbd', { text: k })), text(UI.arrows))),
+      el('div', { class: 'spl-help-item' }, el('b', {}, text(UI.hold)), text(UI.holdText)),
+      el('div', { class: 'spl-help-item' }, el('b', {}, text(UI.look)), text(UI.lookText)));
     root.append(stage, help);
 
     // ---- Option buttons
-    function optionButton(label, title, art, onPick) {
-      const b = el('button', { type: 'button', class: 'spl-opt', title }, art, el('span', { class: 'spl-opt-name', text: label }));
+    function optionButton(label, title, art, onPick) {             // label: a T() text; title: a function
+      const name = el('span', { class: 'spl-opt-name' });
+      const b = el('button', { type: 'button', class: 'spl-opt' }, art, name);
+      bind(() => { name.textContent = tr(label); b.title = title(); });
       b.addEventListener('click', onPick);
       return b;
     }
@@ -498,7 +588,9 @@
       const id = `${uid}-group-${++groupCount}`;
       body.setAttribute('role', role);
       body.setAttribute('aria-labelledby', id);
-      return el('div', { class: 'spl-pick' }, el('div', { class: 'spl-pick-title', id, text: title }), body);
+      const head = el('div', { class: 'spl-pick-title', id });
+      bind(() => { head.textContent = tr(title); });
+      return el('div', { class: 'spl-pick' }, head, body);
     }
     const press = (buttons, k) => buttons.forEach((b, j) => b.setAttribute('aria-pressed', String(j === k)));
 
@@ -507,7 +599,7 @@
       const icon = el('canvas', { class: 'spl-ico', 'aria-hidden': 'true' });
       icon.width = icon.height = 16;
       drawIcon(icon, ICONS[L.icon], L.rgb);
-      const b = optionButton(L.label, L.name, icon, () => { state.lamp = k; applyLamp(); syncLights(); redraw(); });
+      const b = optionButton(L.label, () => nameOf(L.id), icon, () => { state.lamp = k; applyLamp(); syncLights(); redraw(); });
       b.style.setProperty('--spl-glow', css(L.rgb));
       lampRow.append(b);
       return b;
@@ -519,7 +611,7 @@
       view.width = 24;
       view.height = 12;
       drawView(view, w.view, viewColor(w));
-      const title = w.lights.length ? w.lights.map((L) => spectra[L.spd].name).join(' + ') : '关上百叶窗';
+      const title = () => (w.lights.length ? w.lights.map((L) => nameOf(L.spd)).join(' + ') : tr(UI.shutters));
       const b = optionButton(w.label, title, view, () => { state.window = k; applyWindow(); syncLights(); redraw(); });
       windowRow.append(b);
       return b;
@@ -539,13 +631,14 @@
     const panels = el('div', { class: 'spl-panels' });
     let activePart = 0;
     const partTabs = PARTS.map((P, p) => {
-      const tabSwatch = el('span', { class: 'spl-tab-swatch' }), tabLabel = el('small');
+      const tabSwatch = el('span', { class: 'spl-tab-swatch' }), tabName = el('span'), tabLabel = el('small');
       const tab = el('button', { type: 'button', class: 'spl-tab', role: 'tab', id: `${uid}-tab-${p}`, 'aria-controls': `${uid}-panel-${p}` },
-        tabSwatch, el('span', { class: 'spl-tab-text' }, P.name, tabLabel));
+        tabSwatch, el('span', { class: 'spl-tab-text' }, tabName, tabLabel));
+      bind(() => { tabName.textContent = tr(P.name); tabLabel.textContent = tr(option(p).label); });
       const panel = el('div', { class: 'spl-pick-row spl-materials', role: 'tabpanel', id: `${uid}-panel-${p}`, 'aria-labelledby': `${uid}-tab-${p}` });
-      const sync = () => { tabSwatch.replaceChildren(swatch(p, option(p))); tabLabel.textContent = option(p).label; };
+      const sync = () => { tabSwatch.replaceChildren(swatch(p, option(p))); tabLabel.textContent = tr(option(p).label); };
       const buttons = P.options.map((o, j) => {
-        const title = spectra[o.main].name + (o.joint ? ` + ${spectra[o.joint].name}` : '');
+        const title = () => nameOf(o.main) + (o.joint ? ` + ${nameOf(o.joint)}` : '');
         return optionButton(o.label, title, swatch(p, o), () => {
           const restyle = option(p).style !== o.style;
           picks[p] = j;
@@ -572,37 +665,42 @@
       });
     }
     syncTabs();
-    root.append(group('提灯', lampRow), group('窗外', windowRow), group('材料', el('div', { class: 'spl-materials-box' }, tabs, panels)));
+    root.append(group(UI.lamp, lampRow), group(UI.window, windowRow), group(UI.materials, el('div', { class: 'spl-materials-box' }, tabs, panels)));
     tabs.setAttribute('role', 'tablist');
 
     // ---- Sliders
     const sliders = el('div', { class: 'spl-sliders' });
     function slider(label, min, max, step, format, onInput) {
-      const input = el('input', { type: 'range', min, max, step, value: 0, 'aria-label': label });
+      const input = el('input', { type: 'range', min, max, step, value: 0 });
       const out = el('output', { text: format(0) });
+      bind(() => input.setAttribute('aria-label', tr(label)));
       input.addEventListener('input', () => { out.textContent = format(+input.value); onInput(+input.value); redraw(); });
       input.addEventListener('pointerup', () => canvas.focus({ preventScroll: true }));   // return focus after dragging with a pointer
-      sliders.append(el('label', { class: 'spl-slider' }, el('span', { text: label }), input, out));
+      sliders.append(el('label', { class: 'spl-slider' }, text(label), input, out));
     }
-    slider('提灯亮度', -2, 1, 0.25, (v) => `×${+(2 ** v).toFixed(2)}`, (v) => { state.intensity = 2 ** v; });
-    slider('曝光', -2, 2, 0.5, (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v)} EV`, (v) => { state.ev = v; applyExposure(); });
+    slider(UI.brightness, -2, 1, 0.25, (v) => `×${+(2 ** v).toFixed(2)}`, (v) => { state.intensity = 2 ** v; });
+    slider(UI.exposure, -2, 2, 0.5, (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v)} EV`, (v) => { state.ev = v; applyExposure(); });
     root.append(sliders);
 
     // ---- Charts and attribution
     const charts = el('div', { class: 'spl-charts' });
     function figure(label) {
-      const chart = makeChart(NW, label), title = el('div', { class: 'spl-fig-title' }), caption = el('figcaption');
+      const chart = makeChart(NW), title = el('div', { class: 'spl-fig-title' }), caption = el('figcaption');
+      bind(() => chart.svg.setAttribute('aria-label', tr(label)));
       charts.append(el('figure', { class: 'spl-fig' }, title, chart.svg, caption));
       return { chart, title, caption };
     }
-    const lightFig = figure('光源的相对光谱功率分布'), reflFig = figure('材料的光谱反射率'), probeFig = figure('一点的入射光谱与反射光谱');
-    lightFig.title.textContent = '光源的光谱';
+    const lightFig = figure(UI.lightChart), reflFig = figure(UI.reflChart), probeFig = figure(UI.probeChart);
+    bind(() => { lightFig.title.textContent = tr(UI.lightTitle); });
     const creditBox = el('p', { class: 'spl-credit' });
-    credits.forEach(({ credit, license }) => {
-      creditBox.append(credit);
-      if (license) creditBox.append('许可：', el('a', { href: new URL(license.href, base).href, text: license.name }), '。');
+    bind(() => {
+      creditBox.replaceChildren();
+      credits.forEach(({ credit, license }) => {
+        creditBox.append(credit[lang] || credit.en || '');
+        if (license) creditBox.append(tr(UI.license), el('a', { href: new URL(license.href, base).href, text: license.name }), tr(UI.end));
+      });
+      creditBox.append(tr(UI.axis));
     });
-    creditBox.append('横轴为波长（nm）。');
     root.append(charts, creditBox);
 
     // ---- Drawing
@@ -621,12 +719,12 @@
       press(windowButtons, state.window);
       const L = lamps[state.lamp], w = windows[state.window];
       lightFig.chart.set([{ v: L.shape, fill: css(L.rgb), cls: 'spl-lamp' }, ...w.lights.map((l) => ({ v: l.shape, cls: 'spl-win' }))]);
-      lightFig.caption.replaceChildren(el('span', { class: 'spl-sw', style: `background:${css(L.rgb)}` }), `提灯：${L.name}`);
-      for (const l of w.lights) lightFig.caption.append(el('br'), el('span', { class: 'spl-leg spl-win' }), `窗外：${spectra[l.spd].name}`);
-      lightFig.caption.append(el('br'), '各自按峰值归一');
-      tag.replaceChildren(el('span', { class: 'spl-tag-dot', style: `background:${css(L.rgb)}` }), L.label);
+      lightFig.caption.replaceChildren(el('span', { class: 'spl-sw', style: `background:${css(L.rgb)}` }), fill(tr(UI.lampOf), nameOf(L.id)));
+      for (const l of w.lights) lightFig.caption.append(el('br'), el('span', { class: 'spl-leg spl-win' }), fill(tr(UI.windowOf), nameOf(l.spd)));
+      lightFig.caption.append(el('br'), tr(UI.perPeak));
+      tag.replaceChildren(el('span', { class: 'spl-tag-dot', style: `background:${css(L.rgb)}` }), tr(L.label));
       if (w.lights.length) {
-        tag.append(el('span', { class: 'spl-sep', text: '·' }), w.label);
+        tag.append(el('span', { class: 'spl-sep', text: '·' }), tr(w.label));
         drawView(outside, w.view, viewColor(w));
       }
       shownPart = null;
@@ -637,13 +735,13 @@
       if (shownPart === p) return;
       shownPart = p;
       if (p < 0) {
-        reflFig.title.textContent = '窗外';
+        reflFig.title.textContent = tr(UI.outside);
         reflFig.chart.set([]);
-        reflFig.caption.textContent = '窗洞处显示窗外景色，不是屋内的表面。';
+        reflFig.caption.textContent = tr(UI.outsideText);
         return;
       }
-      const o = option(p), mats = [spectra[o.main], ...(o.joint ? [spectra[o.joint]] : [])];
-      reflFig.title.textContent = `${PARTS[p].name}的反射率`;
+      const o = option(p), mats = [o.main, ...(o.joint ? [o.joint] : [])].map((id) => ({ v: spectra[id].v, name: nameOf(id) }));
+      reflFig.title.textContent = fill(tr(UI.reflTitle), tr(PARTS[p].name));
       reflFig.chart.set(mats.map((m, j) => ({ v: m.v, cls: j ? 'spl-joint' : 'spl-main' })));
       reflFig.caption.replaceChildren();
       mats.forEach((m, j) => {
@@ -690,13 +788,13 @@
       const s = new Float32Array(E.memory.buffer, E.light_probe(px, py), 2 * NW);
       const incident = s.subarray(0, NW), reflected = s.subarray(NW), m = Math.max(...incident) || 1;
       const k = 4 * (py * W + px), rgb = [image.data[k], image.data[k + 1], image.data[k + 2]];
-      probeFig.title.textContent = hover ? '指针所指的光谱' : '小点脚下的光谱';
+      probeFig.title.textContent = tr(hover ? UI.probePointer : UI.probeDot);
       probeFig.chart.set([
         { v: Array.from(reflected, (a) => a / m), fill: css(rgb), cls: 'spl-out' },
         { v: Array.from(incident, (a) => a / m), cls: 'spl-in' },
       ]);
-      probeFig.caption.replaceChildren(el('span', { class: 'spl-leg spl-in' }), '照到这里的光', el('br'),
-        el('span', { class: 'spl-sw', style: `background:${css(rgb)}` }), '反射出来的光（以入射光的峰值归一）');
+      probeFig.caption.replaceChildren(el('span', { class: 'spl-leg spl-in' }), tr(UI.incident), el('br'),
+        el('span', { class: 'spl-sw', style: `background:${css(rgb)}` }), tr(UI.reflected));
     }
 
     // ---- Input
@@ -770,6 +868,17 @@
     }).observe(stage);
     reduceMotion.addEventListener('change', redraw);
 
+    function setLang(l) {
+      if (l === lang) return;
+      lang = l;
+      try { localStorage.setItem(LANG_KEY, l); } catch (e) { /* storage unavailable */ }
+      root.lang = HTML_LANG[l];
+      relabel.forEach((fn) => fn());
+      syncLights();
+      redraw();
+    }
+
+    root.lang = HTML_LANG[lang];
     syncLights();
     redraw();
   }
@@ -777,8 +886,9 @@
   function boot() {
     for (const root of document.querySelectorAll('.spl-demo')) {
       const base = new URL(root.dataset.base || './', location.href);    // directory of engine.wasm and the data
-      load(base).then((data) => mount(root, base, data)).catch((err) => {
-        root.textContent = `演示加载失败：${err.message}`;
+      const lang = startLang(root);
+      load(base, lang).then((data) => mount(root, base, lang, data)).catch((err) => {
+        root.textContent = fill(UI.failed[lang], err.message);
       });
     }
   }

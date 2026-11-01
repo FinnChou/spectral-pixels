@@ -29,7 +29,7 @@ no imports) that runs in the browser, and the two produce byte-identical output.
 - Point anywhere to see the reflectance of the material there, and the spectra of the light arriving at that point
   and of the light it reflects.
 
-The interface of the demo is in Chinese.
+The interface of the demo is in Chinese, English and Japanese; switch between them in the corner of the frame.
 
 ## The engine
 
@@ -193,7 +193,8 @@ The header of `tools/prep.c` documents how the data are processed (sampling, ave
 ```
 
 `data-base` is the directory that holds `engine.wasm` and the two data files. Build `engine.wasm` with `make`, or take the
-one served with the live demo, <https://finnchou.github.io/spectral-pixels/engine.wasm>. Interface colours follow the CSS
+one served with the live demo, <https://finnchou.github.io/spectral-pixels/engine.wasm>. The interface starts in Chinese;
+`data-lang="en"` or `data-lang="ja"` starts it in English or Japanese. Interface colours follow the CSS
 variables of the host page (`--card-bg`, `--text-color`, `--text-muted-color`, `--main-border-color`) and fall back
 to a light theme.
 
