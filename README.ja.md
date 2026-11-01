@@ -13,7 +13,7 @@ WebAssembly（約 27 KB、インポートなし）の両方をビルドし、後
 ![デモ：ろうそくを持って部屋を歩く。窓の外は晴天](media/demo.webp)
 
 - オンラインデモ：<https://finnchou.github.io/spectral-pixels/>
-- 作者のブログ（中国語）：[Finn's blog](https://finnchou.github.io/)
+- 解説記事（作者のブログ、中国語）：[番外（一）：用光谱给像素小屋打光](https://finnchou.github.io/posts/Spectral-Pixel-Lighting/)
 
 ## デモでできること
 
