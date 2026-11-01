@@ -7,8 +7,8 @@
 波長ごとに計算する 2D ピクセルアートのライティング。光源は実測または規格化された相対分光分布で、材料は実測された建材の分光反射率で
 表す。各ピクセルで両者を 400–700 nm にわたって掛け合わせて積分し、CIE XYZ を求めてから sRGB に変換して表示する。
 
-エンジンは C で書かれている。同じソースからネイティブプログラムと WebAssembly（約 21 KB、インポートなし）の両方を
-ビルドし、後者はブラウザで動く。両者の出力はバイト単位で一致する。
+エンジンは C11 で書かれた小さなライブラリで、自分のプログラムからそのまま使える。同じソースからネイティブプログラムと
+WebAssembly（約 27 KB、インポートなし）の両方をビルドし、後者はブラウザで動く。両者の出力はバイト単位で一致する。
 
 ![デモ：ろうそくを持って部屋を歩く。窓の外は晴天](media/demo.webp)
 
@@ -27,61 +27,96 @@
 
 デモの UI は中国語・英語・日本語に対応し、画面の右上で切り替えられる。
 
-## エンジン
+## 自分のプログラムで使う
+
+エンジンは単独で使える C11 のライブラリである。公開インターフェースは [`include/spl.h`](include/spl.h)、実装は
+`src/spl.c` の 1 ファイル（と、生成された `src/cmf.h`、`src/srgb_lut.h`）で、標準ライブラリと libm にしか依存しない。
+この 4 つのファイルを自分のプロジェクトに入れるか、`make lib` で静的ライブラリ `build/libspl.a` をビルドすればよい。
+共有ライブラリにする場合は、ビルドする側と使う側の両方で `SPL_SHARED` を定義すること。ライブラリはグローバルな状態を
+持たず、複数のエンジンを同時に作れる。
 
 エンジンが扱うのはスペクトルだけ、すなわち各光源の相対分光分布と、行番号で引く反射率の表である。材料の名前も
 シーンの形も知らない。各ピクセルにどの面が見えているか、空間のどこが光を遮るかは、呼び出し側がいくつかのバッファで
-伝える。インターフェースはすべて [`src/light.h`](src/light.h) にある。
+伝える。
 
 | 部分 | 関数 |
 |---|---|
-| シーン | `light_surfaces()`：各ピクセルに見える面の位置、法線、反射率の行番号、テクスチャの明暗<br>`light_heights()`、`light_gaps()`、`light_set_ceiling()`：遮蔽物（開口を持てる高さ場） |
-| 光源（最大 8 個） | `light_set_spectrum()`；`light_point()` 点光源、`light_sun()` 平行光源、`light_area()` 平行四辺形の面光源；`light_off()` |
-| 材料と出力 | `light_set_reflectance()`、`light_set_ambient()`、`light_set_exposure()`；`light_render()` は RGBA を、`light_probe()` は 1 点の入射・反射スペクトルを返す |
+| エンジン | `spl_create()` は `spl_config`（幅、高さ、反射率の行数、光源の数。上限は `SPL_MAX_*`）から作り、`spl_destroy()` で解放する；`spl_version()` |
+| シーン | `spl_surfaces()`：各ピクセルに見える面の位置、法線、反射率の行番号、テクスチャの明暗<br>`spl_heights()`、`spl_gaps()`、`spl_set_ceiling()`：遮蔽物（開口を持てる高さ場）。変更後は `spl_invalidate()` を呼ぶ |
+| 光源 | `spl_light_set_spectrum()`；`spl_light_set_point()` 点光源、`spl_light_set_directional()` 平行光源、`spl_light_set_area()` 平行四辺形の面光源；`spl_light_disable()` |
+| 材料と出力 | `spl_set_reflectance()`、`spl_set_ambient()`、`spl_set_exposure()`；`spl_render()` は呼び出し側のバッファに RGBA を書き、`spl_probe()` は 1 点の入射・反射スペクトルを返す |
+| 色のユーティリティ | `spl_light_rgb()` は光源そのものの色、`spl_surface_rgb()` はある照度での面の表示色を返す。エンジンは不要 |
 
-最小の例：反射率 50 % のグレーの床を等エネルギー光源で照らし、床の上に高さ 16 px のブロックを置く。
+失敗しうる関数は `spl_status` を返す。引数が無効（NULL ポインタ、範囲外の添字、有限でない値やドキュメントの範囲外の値）
+なら `SPL_ERR_ARGUMENT` を返し、エンジンは変更しない。メモリが足りなければ `spl_create()` は `SPL_ERR_MEMORY` を返す。座標、単位、スペクトルの正規化、幾何キャッシュの約束事は
+`spl.h` の冒頭に書いてある。
+
+最小の例は [`examples/minimal.c`](examples/minimal.c) である。反射率 50 % のグレーの床を等エネルギー光源で照らし、
+床の上に高さ 16 px のブロックを置く。エラー処理とファイル出力を除いた中心部分は次のとおり：
 
 ```c
-#include "light.h"
+spl_config config = { 256, 160, 1, 1 }; /* 256 × 160 ピクセル、反射率 1 行、光源 1 個 */
+spl_engine *engine;
+spl_create(&config, &engine);
 
-int main(void) {
-  float spd[LIGHT_NW], refl[LIGHT_NW];
-  for (int i = 0; i < LIGHT_NW; i++) { spd[i] = 1; refl[i] = 0.5f; }   /* 等エネルギー光源、50 % グレー */
-
-  LightSurface *s = light_surfaces();
-  float *h = light_heights();
-  for (int y = 0; y < LIGHT_H; y++)
-    for (int x = 0; x < LIGHT_W; x++) {
-      int i = y * LIGHT_W + x, block = x >= 120 && x < 136 && y >= 72 && y < 88;
-      h[i] = block ? 16 : 0;                                           /* 高さ 16 px のブロック */
-      s[i] = (LightSurface){ { x + 0.5f, y + 0.5f, h[i] }, { 0, 0, 1 }, 0, 1 };  /* 真上から見た上面のみ */
-    }
-  light_invalidate();
-
-  light_set_reflectance(0, refl);
-  light_set_spectrum(0, spd);
-  light_point(0, 96, 80, 24, 2000);
-  const unsigned char *rgba = light_render();                          /* LIGHT_W × LIGHT_H × RGBA */
-  return rgba[0] == 0;
+float light[SPL_NW];
+float grey[SPL_NW];
+for (int k = 0; k < SPL_NW; k++) {
+    light[k] = 1;   /* 等エネルギー */
+    grey[k] = 0.5f; /* 全波長で反射率 50 % */
 }
+
+/* 真上から見る：各ピクセルには床かブロックの上面が見える */
+spl_surface *surfaces = spl_surfaces(engine);
+float *heights = spl_heights(engine);
+for (int y = 0; y < 160; y++) {
+    for (int x = 0; x < 256; x++) {
+        int i = y * 256 + x;
+        int block = x >= 120 && x < 136 && y >= 72 && y < 88;
+        heights[i] = block ? 16 : 0;
+        spl_surface s = { { x + 0.5f, y + 0.5f, heights[i] }, { 0, 0, 1 }, 0, 1 };
+        surfaces[i] = s;
+    }
+}
+spl_invalidate(engine);
+
+spl_set_reflectance(engine, 0, grey);
+spl_light_set_spectrum(engine, 0, light);
+spl_light_set_point(engine, 0, 96, 80, 24, 2000);
+
+static uint8_t rgba[256 * 160 * 4];
+spl_render(engine, rgba);
+spl_destroy(engine);
 ```
 
-`zig cc -std=c11 -Isrc example.c src/light.c -lm` でコンパイルできる。デモのシーン（斜投影、ピクセルテクスチャ、窓）は
-[`src/scene.c`](src/scene.c) にある。これはエンジンを呼び出す側であり、エンジンの一部ではない。
+`make example` でビルドして実行すると `build/minimal.ppm` を書き出す。直接
+`cc -std=c11 -Iinclude -Isrc examples/minimal.c src/spl.c -lm` でコンパイルしてもよい。デモのシーン（斜投影、
+ピクセルテクスチャ、窓）は [`demo/`](demo/) にある。エンジンは `spl.h` を通してのみ使っているので、より大きな例として
+読むこともできる。
+
+バージョンは `SPL_VERSION_MAJOR`、`SPL_VERSION_MINOR`、`SPL_VERSION_PATCH` と `spl_version()` で分かる。0.x の間は
+インターフェースが変わる可能性があり、変更はすべて [`CHANGELOG.md`](CHANGELOG.md) に記録する。
 
 ## ファイル
 
 | パス | 内容 |
 |---|---|
-| `src/light.h`、`src/light.c` | エンジン：スペクトルの積和、照度、遮蔽、環境光の推定、トーンマッピング、sRGB 符号化 |
-| `src/scene.h`、`src/scene.c` | デモのシーン：マップ、手続き的に生成するピクセルテクスチャ、斜投影、窓。エンジンの入力バッファを埋める |
+| `include/spl.h` | ライブラリの公開インターフェース |
+| `src/spl.c` | ライブラリの実装：スペクトルの積和、照度、遮蔽、環境光の推定、トーンマッピング、sRGB 符号化 |
 | `src/cmf.h`、`src/srgb_lut.h` | `prep` が生成するヘッダ：CIE 1931 等色関数、sRGB の量子化しきい値 |
+| `demo/scene.h`、`demo/scene.c` | デモのシーン：マップ、手続き的に生成するピクセルテクスチャ、斜投影、窓。エンジンの入力バッファを埋める |
+| `demo/wasm.c` | WebAssembly 版が追加でエクスポートするメモリ確保関数と定数 |
+| `tests/test_spl.c` | 単体テスト：引数の検査、逆二乗則と余弦則、遮蔽、面光源、環境光、幾何キャッシュ、極端な入力、エンジン同士の独立性など |
+| `tests/reference.txt` | 基準出力の SHA-256。`make check` が照合する |
+| `examples/minimal.c` | 最小の完全な例 |
 | `tools/prep.c` | データの前処理：CIE データ表と KLUM ライブラリから、上の 2 つのヘッダと 2 つのデータファイルを生成する |
 | `tools/render.c` | コマンドラインのレンダラ：静止画を出力し、比較の基準にもなる |
 | `tools/check.mjs` | ネイティブ版と WebAssembly 版のバイト単位の比較 |
 | `tools/data.sha256` | 元データの SHA-256 |
 | `docs/` | ウェブ版デモ（GitHub Pages）：`index.html`、`demo.js`、`demo.css`；生成物の `illuminants.txt`、`reflectances.txt`；KLUM から複製したライセンス全文 `GPL-2.0.txt`。`make` は `engine.wasm` をここに出力する |
-| `.github/workflows/build.yml` | CI：ビルドと `make check` を行い、main へのプッシュ時には `docs/` をビルドした `engine.wasm` とともに GitHub Pages へ公開する |
+| `.github/workflows/build.yml` | CI：zig cc、gcc、clang で単体テストを実行し、サニタイザ付きでも実行し、ライブラリと例をビルドし、`make check` を行う。main へのプッシュ時には `docs/` をビルドした `engine.wasm` とともに GitHub Pages へ公開する |
+| `.clang-format` | コードの書式 |
+| `CHANGELOG.md` | バージョン間の変更履歴 |
 | `media/demo.webp` | このページのアニメーション |
 
 生成したヘッダとデータファイルはコミットしてあるので、元データがなくてもビルドできる。`engine.wasm` はビルド成果物なので
@@ -89,12 +124,19 @@ int main(void) {
 
 ## ビルド
 
-ビルドには [zig](https://ziglang.org/) 0.17.0（`zig cc` を使う）が、`make check` にはさらに Node.js 18 以降が必要である。
+既定のコンパイラは [zig](https://ziglang.org/) 0.17.0 の `zig cc` である。ライブラリ、単体テスト、ネイティブのツールは
+任意の C11 コンパイラでビルドできる（例：`make -B test CC=gcc`）。WebAssembly 版には zig が、`make check` にはさらに
+Node.js 18 以降が必要である。
 
 ```sh
 make          # docs/engine.wasm とネイティブプログラム render
-make check    # ネイティブ版と WebAssembly 版をバイト単位で比較
+make lib      # 静的ライブラリ build/libspl.a
+make test     # 単体テスト
+make sanitize # AddressSanitizer と UndefinedBehaviorSanitizer 付きで単体テスト（clang）。spl.h を C++ としてもコンパイル
+make example  # examples/minimal.c を実行し build/minimal.ppm を出力
+make check    # ネイティブ版と WebAssembly 版をバイト単位で比較し、tests/reference.txt の基準出力とも照合
 make data     # 元データからヘッダとデータファイルを再生成（次節を参照）
+make format   # clang-format で C のソースを整形
 make clean
 ```
 
@@ -102,6 +144,9 @@ make clean
 コンパイルし、乗算と加算を 1 回の丸めにまとめないことである。もう 1 つは、エンジンとシーンが IEEE 754 で厳密に定義された
 演算（float と double の四則演算、`sqrtf`、`floorf`、`fmodf`、`fabsf`、`fminf`、`fmaxf`、整数と浮動小数点数の間の変換）
 だけを使うことである。sRGB の符号化では `powf` を呼ばず、`prep` が倍精度で前もって計算したしきい値の表を引く。
+自分のプロジェクトでライブラリをコンパイルする場合も、プラットフォーム間でバイト単位の一致が必要なら
+`-ffp-contract=off` を付ける。付けなくても結果の正しさは変わらないが、FMA 命令を持つプラットフォームでは、ごく一部の
+ピクセルのあるチャンネルが 1 段階ずれることがある。
 
 `render` の使い方は `tools/render.c` の冒頭にある。例：
 
@@ -172,8 +217,9 @@ CIE データ表の一覧は <https://cie.co.at/data-tables> にある。
 - ホワイトバランスは行わず、光源はそれ自体の色で表示される。sRGB の色域外の成分は 0 に切り詰める。
 - 遮蔽物は 1 px 単位でラスタライズする。点光源と平行光源の影は硬く、縁はギザギザになる。また、2 つの物体のごく狭い
   隙間を通る光は、途切れた細い線として現れる。
-- デモの部屋の南側には壁がなく、遮蔽計算でも開放として扱う。窓の開口に描く外の景色は様式化した絵で、計算には関与しない。
-- エンジンは単一インスタンスで、再入可能ではない。返されるポインタは内部の静的バッファを指す。
+- デモの部屋は 256 × 160 ピクセルに固定されている。南側には壁がなく、遮蔽計算でも開放として扱う。窓の開口に描く外の景色は
+  様式化した絵で、計算には関与しない。
+- 1 つのエンジンを 2 つのスレッドから同時に使ってはならない。別々のエンジンは互いに影響しない。
 
 ## ウェブページへの埋め込み
 
@@ -187,13 +233,20 @@ CIE データ表の一覧は <https://cie.co.at/data-tables> にある。
 オンラインデモが配信しているもの（<https://finnchou.github.io/spectral-pixels/engine.wasm>）を使う。UI は中国語で始まり、`data-lang="en"` か `data-lang="ja"` を指定すると英語か日本語で始まる。UI の色はホストページの CSS 変数
 （`--card-bg`、`--text-color`、`--text-muted-color`、`--main-border-color`）に従い、定義がなければライトテーマの値を使う。
 
+## 開発への参加
+
+issue と pull request を歓迎する。提出の前に `make format`、`make test`、`make sanitize`、`make check` を実行すること。
+レンダリング結果の変化はすべて意図したものでなければならない。`make check` はそれを差異として報告するので、確認したうえで
+`node tools/check.mjs --update` で `tests/reference.txt` を更新し、どの出力がなぜ変わるのかを説明に書くこと。
+インターフェースの変更は `CHANGELOG.md` に記録する。
+
 ## ライセンス
 
 下記のデータファイルを除き、このリポジトリの内容は [MIT](LICENSE) ライセンス、© 2026 FinnZhou で公開する。著作権表示と
 ライセンス文を残せば、商用を含めて自由に使用・改変・再配布できる。
 
 - `src/cmf.h` と `docs/illuminants.txt` は CIE のデータを含み、[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
-  で配布する。`src/light.c` からビルドしたプログラム（`engine.wasm`、`render`、利用者自身のプログラム）にはすべて `cmf.h`
+  で配布する。`src/spl.c` からビルドしたプログラム（`libspl.a`、`engine.wasm`、`render`、利用者自身のプログラム）にはすべて `cmf.h`
   が組み込まれる。このデータは引き続き CC BY-SA 4.0 に従うため、再配布の際は CIE のクレジットとライセンスへのリンクを残すこと。
 - `docs/reflectances.txt` は KLUM のデータを含み、GPL-2.0 で配布する。ライセンス全文は [`docs/GPL-2.0.txt`](docs/GPL-2.0.txt) にある。
   このファイルはプレーンテキストでそれ自体がソース形式であり、`tools/prep.c` によって上流の固定コミットのデータから再現できる。

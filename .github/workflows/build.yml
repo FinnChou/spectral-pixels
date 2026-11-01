@@ -1,5 +1,7 @@
-# Builds the engine, checks that the native and WebAssembly builds agree byte for byte, and publishes
-# docs/ together with the freshly built engine.wasm to GitHub Pages (pushes to main only).
+# Runs the unit tests with three compilers and under sanitizers, builds the library and the example,
+# checks that the native and WebAssembly builds agree byte for byte and match the reference outputs,
+# and publishes docs/ together with the freshly built engine.wasm to GitHub Pages (pushes to main
+# only).
 name: build
 
 on:
@@ -22,6 +24,12 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - run: make -B test
+      - run: make -B test CC=gcc
+      - run: make -B test CC=clang
+      - run: make sanitize
+      - run: make lib CC=gcc
+      - run: make example
       - run: make check
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
