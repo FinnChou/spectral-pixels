@@ -15,7 +15,7 @@ produce byte-identical output.
 ![Demo: walking around the room with a candle while the sun shines through the window](media/demo.webp)
 
 - Live demo: <https://finnchou.github.io/spectral-pixels/>
-- Write-up on the author's blog (in Chinese): [番外（一）：用光谱给像素小屋打光](https://finnchou.github.io/posts/Spectral-Pixel-Lighting/)
+- Write-up on the author's blog (in Chinese): [光谱渲染：给一间像素小屋打光](https://finnchou.github.io/posts/Spectral-Pixel-Lighting/)
 
 ## The demo
 

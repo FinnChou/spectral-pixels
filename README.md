@@ -13,7 +13,7 @@
 ![演示：提着烛光在屋里走动，窗外是晴天](media/demo.webp)
 
 - 在线试玩：<https://finnchou.github.io/spectral-pixels/>
-- 介绍文章：[番外（一）：用光谱给像素小屋打光](https://finnchou.github.io/posts/Spectral-Pixel-Lighting/)（作者的博客）
+- 介绍文章：[光谱渲染：给一间像素小屋打光](https://finnchou.github.io/posts/Spectral-Pixel-Lighting/)（作者的博客）
 
 ## 演示里能做什么
 
