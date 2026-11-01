@@ -8,8 +8,9 @@
 spectral power distributions, materials by measured spectral reflectances of building materials. For every pixel the
 two are multiplied and summed over 400–700 nm to give CIE XYZ, which is then converted to sRGB for display.
 
-The engine is written in C. The same source is compiled both to a native program and to WebAssembly (about 21 KB,
-no imports) that runs in the browser, and the two produce byte-identical output.
+The engine is a small library written in C11 that can be used directly in your own programs. The same source is
+compiled both to a native program and to WebAssembly (about 27 KB, no imports) that runs in the browser, and the two
+produce byte-identical output.
 
 ![Demo: walking around the room with a candle while the sun shines through the window](media/demo.webp)
 
@@ -31,62 +32,96 @@ no imports) that runs in the browser, and the two produce byte-identical output.
 
 The interface of the demo is in Chinese, English and Japanese; switch between them in the corner of the frame.
 
-## The engine
+## Using it in your own program
+
+The engine is a self-contained C11 library: the public interface is [`include/spl.h`](include/spl.h) and the
+implementation is the single file `src/spl.c` (plus the generated `src/cmf.h` and `src/srgb_lut.h`). It depends only on
+the standard library and libm. Copy these four files into your project, or build the static library `build/libspl.a`
+with `make lib`; for a shared library, define `SPL_SHARED` both when building and when using it. The library has no
+global state; several engines can exist at the same time.
 
 The engine only works with spectra: the relative spectral power distribution of each light and a table of
 reflectances indexed by row. It does not know what the materials are called or what the scene looks like; the caller
-tells it, through a few buffers, which surface each pixel shows and which parts of space block light. The whole
-interface is in [`src/light.h`](src/light.h).
+tells it, through a few buffers, which surface each pixel shows and which parts of space block light.
 
 | Part | Functions |
 |---|---|
-| Scene | `light_surfaces()`: position, normal, reflectance row and texture shade of the surface seen at each pixel<br>`light_heights()`, `light_gaps()`, `light_set_ceiling()`: occluders (a height field with optional openings) |
-| Lights (up to 8) | `light_set_spectrum()`; `light_point()` point light, `light_sun()` directional light, `light_area()` parallelogram area light; `light_off()` |
-| Materials and output | `light_set_reflectance()`, `light_set_ambient()`, `light_set_exposure()`; `light_render()` returns RGBA, `light_probe()` the incident and reflected spectra at a pixel |
+| Engine | `spl_create()` from an `spl_config` (width, height, reflectance rows, lights; limits in `SPL_MAX_*`), `spl_destroy()`; `spl_version()` |
+| Scene | `spl_surfaces()`: position, normal, reflectance row and texture shade of the surface seen at each pixel<br>`spl_heights()`, `spl_gaps()`, `spl_set_ceiling()`: occluders (a height field with optional openings); call `spl_invalidate()` after changing them |
+| Lights | `spl_light_set_spectrum()`; `spl_light_set_point()` point light, `spl_light_set_directional()` directional light, `spl_light_set_area()` parallelogram area light; `spl_light_disable()` |
+| Materials and output | `spl_set_reflectance()`, `spl_set_ambient()`, `spl_set_exposure()`; `spl_render()` writes RGBA into a buffer of the caller, `spl_probe()` gives the incident and reflected spectra at a pixel |
+| Colour utilities | `spl_light_rgb()` the colour of a light itself, `spl_surface_rgb()` the displayed colour of a surface under a given illuminance; no engine needed |
 
-A minimal example: an equal-energy light above a 50 % grey floor with a 16 px tall block on it.
+Functions that can fail return an `spl_status`: an invalid argument (a NULL pointer, an index out of range, a value
+that is not finite or outside its documented range) returns `SPL_ERR_ARGUMENT` and leaves the engine unchanged;
+`spl_create()` returns `SPL_ERR_MEMORY` when memory runs out. The
+conventions for coordinates, units, the normalization of spectra and the geometry cache are in the header of `spl.h`.
+
+The smallest example is [`examples/minimal.c`](examples/minimal.c): an equal-energy light above a 50 % grey floor with a
+16 px tall block on it. Its core, without error handling and file output:
 
 ```c
-#include "light.h"
+spl_config config = { 256, 160, 1, 1 }; /* 256 × 160 pixels, one reflectance row, one light */
+spl_engine *engine;
+spl_create(&config, &engine);
 
-int main(void) {
-  float spd[LIGHT_NW], refl[LIGHT_NW];
-  for (int i = 0; i < LIGHT_NW; i++) { spd[i] = 1; refl[i] = 0.5f; }   /* equal-energy light, 50 % grey */
-
-  LightSurface *s = light_surfaces();
-  float *h = light_heights();
-  for (int y = 0; y < LIGHT_H; y++)
-    for (int x = 0; x < LIGHT_W; x++) {
-      int i = y * LIGHT_W + x, block = x >= 120 && x < 136 && y >= 72 && y < 88;
-      h[i] = block ? 16 : 0;                                           /* a block 16 px tall */
-      s[i] = (LightSurface){ { x + 0.5f, y + 0.5f, h[i] }, { 0, 0, 1 }, 0, 1 };  /* top view: tops only */
-    }
-  light_invalidate();
-
-  light_set_reflectance(0, refl);
-  light_set_spectrum(0, spd);
-  light_point(0, 96, 80, 24, 2000);
-  const unsigned char *rgba = light_render();                          /* LIGHT_W × LIGHT_H × RGBA */
-  return rgba[0] == 0;
+float light[SPL_NW];
+float grey[SPL_NW];
+for (int k = 0; k < SPL_NW; k++) {
+    light[k] = 1;   /* equal energy */
+    grey[k] = 0.5f; /* 50 % reflectance at every wavelength */
 }
+
+/* seen from above: every pixel shows the floor or the top of the block */
+spl_surface *surfaces = spl_surfaces(engine);
+float *heights = spl_heights(engine);
+for (int y = 0; y < 160; y++) {
+    for (int x = 0; x < 256; x++) {
+        int i = y * 256 + x;
+        int block = x >= 120 && x < 136 && y >= 72 && y < 88;
+        heights[i] = block ? 16 : 0;
+        spl_surface s = { { x + 0.5f, y + 0.5f, heights[i] }, { 0, 0, 1 }, 0, 1 };
+        surfaces[i] = s;
+    }
+}
+spl_invalidate(engine);
+
+spl_set_reflectance(engine, 0, grey);
+spl_light_set_spectrum(engine, 0, light);
+spl_light_set_point(engine, 0, 96, 80, 24, 2000);
+
+static uint8_t rgba[256 * 160 * 4];
+spl_render(engine, rgba);
+spl_destroy(engine);
 ```
 
-Compile with `zig cc -std=c11 -Isrc example.c src/light.c -lm`. The scene of the demo (oblique projection, pixel
-textures, window) is in [`src/scene.c`](src/scene.c); it is a client of the engine, not part of it.
+`make example` builds and runs it and writes `build/minimal.ppm`; or compile it directly with
+`cc -std=c11 -Iinclude -Isrc examples/minimal.c src/spl.c -lm`. The scene of the demo (oblique projection, pixel
+textures, window) is in [`demo/`](demo/); it uses the engine only through `spl.h` and can be read as a fuller example.
+
+The version is given by `SPL_VERSION_MAJOR`, `SPL_VERSION_MINOR`, `SPL_VERSION_PATCH` and `spl_version()`. While the
+version is 0.x the interface may still change; every change is recorded in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Files
 
 | Path | Contents |
 |---|---|
-| `src/light.h`, `src/light.c` | The engine: spectral sums, illuminance, occlusion, ambient light estimate, tone mapping, sRGB encoding |
-| `src/scene.h`, `src/scene.c` | The demo scene: map, procedural pixel textures, oblique projection, window; fills the engine's input buffers |
+| `include/spl.h` | The public interface of the library |
+| `src/spl.c` | The implementation: spectral sums, illuminance, occlusion, ambient light estimate, tone mapping, sRGB encoding |
 | `src/cmf.h`, `src/srgb_lut.h` | Headers generated by `prep`: CIE 1931 colour-matching functions, sRGB quantization thresholds |
+| `demo/scene.h`, `demo/scene.c` | The demo scene: map, procedural pixel textures, oblique projection, window; fills the engine's input buffers |
+| `demo/wasm.c` | Memory allocation and constants exported additionally by the WebAssembly build |
+| `tests/test_spl.c` | Unit tests: argument checks, inverse-square and cosine laws, occlusion, area lights, ambient light, the geometry cache, extreme inputs, independence of engines and more |
+| `tests/reference.txt` | SHA-256 of the reference outputs, checked by `make check` |
+| `examples/minimal.c` | The smallest complete example |
 | `tools/prep.c` | Data preparation: generates the two headers above and the two data files from the CIE data tables and the KLUM library |
 | `tools/render.c` | Command-line renderer: produces stills and serves as the reference for the comparison |
 | `tools/check.mjs` | Byte-by-byte comparison of the native and WebAssembly builds |
 | `tools/data.sha256` | SHA-256 of the raw data |
 | `docs/` | The web demo (GitHub Pages): `index.html`, `demo.js`, `demo.css`; the generated `illuminants.txt`, `reflectances.txt`; `GPL-2.0.txt`, the license text copied from KLUM. `make` builds `engine.wasm` here |
-| `.github/workflows/build.yml` | CI: builds, runs `make check`, and on pushes to main publishes `docs/` with the freshly built `engine.wasm` to GitHub Pages |
+| `.github/workflows/build.yml` | CI: runs the unit tests with zig cc, gcc and clang and under sanitizers, builds the library and the example, runs `make check`, and on pushes to main publishes `docs/` with the freshly built `engine.wasm` to GitHub Pages |
+| `.clang-format` | Code formatting |
+| `CHANGELOG.md` | Record of changes between versions |
 | `media/demo.webp` | The animation on this page |
 
 The generated headers and data files are committed, so building does not require the raw data. `engine.wasm` is a build
@@ -94,12 +129,19 @@ output and is not committed: build it locally with `make`; the live demo is buil
 
 ## Building
 
-Requires [zig](https://ziglang.org/) 0.17.0 (for `zig cc`); `make check` also requires Node.js 18 or later.
+The default compiler is `zig cc` from [zig](https://ziglang.org/) 0.17.0. The library, the unit tests and the native
+tools build with any C11 compiler (for example `make -B test CC=gcc`); the WebAssembly build needs zig, and
+`make check` also requires Node.js 18 or later.
 
 ```sh
 make          # docs/engine.wasm and the native program render
-make check    # compare the native and WebAssembly builds byte by byte
+make lib      # the static library build/libspl.a
+make test     # unit tests
+make sanitize # unit tests under AddressSanitizer and UndefinedBehaviorSanitizer (clang); spl.h compiled as C++
+make example  # examples/minimal.c, writes build/minimal.ppm
+make check    # compare the native and WebAssembly builds byte by byte, and both with tests/reference.txt
 make data     # regenerate the headers and data files from the raw data (see below)
+make format   # format the C sources with clang-format
 make clean
 ```
 
@@ -107,7 +149,9 @@ The native and WebAssembly results agree for two reasons: both targets are compi
 multiplication and addition are fused into a single rounding; and the engine and scene use only operations that
 IEEE 754 defines exactly (float and double arithmetic, `sqrtf`, `floorf`, `fmodf`, `fabsf`, `fminf`, `fmaxf`, and
 conversions between integers and floating point). The sRGB encoding looks up thresholds that `prep` computes in
-double precision instead of calling `powf`.
+double precision instead of calling `powf`. When you compile the library in your own project, add
+`-ffp-contract=off` if you need byte-identical results across platforms. Without it the results are still correct,
+but on platforms with FMA instructions a channel of an occasional pixel may differ by one level.
 
 See the header of `tools/render.c` for the usage of `render`, for example:
 
@@ -180,9 +224,9 @@ The header of `tools/prep.c` documents how the data are processed (sampling, ave
 - There is no white balancing; lights appear in their own colour. Components outside the sRGB gamut are clipped to 0.
 - Occluders are rasterized at 1 px. Point and directional lights cast hard shadows with jagged edges, and light passing
   through a very narrow gap between two objects shows up as a broken thin line.
-- The south side of the demo room has no wall and is open for occlusion as well. The view drawn in the window opening is
-  a stylized picture and takes no part in the computation.
-- There is a single engine instance and it is not reentrant; returned pointers refer to internal static buffers.
+- The demo room is fixed at 256 × 160 pixels. Its south side has no wall and is open for occlusion as well. The view
+  drawn in the window opening is a stylized picture and takes no part in the computation.
+- One engine must not be used from two threads at the same time; separate engines do not affect each other.
 
 ## Embedding
 
@@ -198,6 +242,13 @@ one served with the live demo, <https://finnchou.github.io/spectral-pixels/engin
 variables of the host page (`--card-bg`, `--text-color`, `--text-muted-color`, `--main-border-color`) and fall back
 to a light theme.
 
+## Contributing
+
+Issues and pull requests are welcome. Before submitting, run `make format`, `make test`, `make sanitize` and
+`make check`. Any change to the rendered output should be intentional: `make check` reports it as a difference; once it
+is confirmed, update `tests/reference.txt` with `node tools/check.mjs --update` and say in the description which
+outputs change and why. Changes to the interface go into `CHANGELOG.md`.
+
 ## License
 
 Except for the data files listed below, the contents of this repository are released under the [MIT](LICENSE)
@@ -205,8 +256,8 @@ license, © 2026 FinnZhou: you may use, modify and redistribute them freely, inc
 copyright notice and the license text are kept.
 
 - `src/cmf.h` and `docs/illuminants.txt` contain CIE data and are distributed under
-  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Every program compiled from `src/light.c`
-  (`engine.wasm`, `render`, or your own) includes `cmf.h`; that data remains under CC BY-SA 4.0, so keep the
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Every program compiled from `src/spl.c`
+  (`libspl.a`, `engine.wasm`, `render`, or your own) includes `cmf.h`; that data remains under CC BY-SA 4.0, so keep the
   attribution to the CIE and the license link when redistributing it.
 - `docs/reflectances.txt` contains KLUM data and is distributed under GPL-2.0; the full license text is in
   [`docs/GPL-2.0.txt`](docs/GPL-2.0.txt). The file is plain text and thus in source form; `tools/prep.c` reproduces it

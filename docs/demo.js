@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 FinnZhou
  *
- * All lighting is computed by engine.wasm (built from src/light.c and src/scene.c). This file only
+ * All lighting is computed by engine.wasm (built from src/spl.c, the engine, and demo/scene.c, the room;
+ * see include/spl.h and demo/scene.h). This file only
  * loads the spectral data and hands the selected spectra to the engine, handles keyboard and pointer
  * input, and draws the frame, the view outside the window and the spectral charts.
  *
@@ -470,7 +471,7 @@
     ]);
     const engine = wasm.instance.exports;
     engine._initialize();
-    const nw = engine.light_spectrum_size(), spectra = {};
+    const nw = new Int32Array(engine.memory.buffer, engine.demo_constants(), 5)[0], spectra = {};
     const credits = [parseData(illuminants, spectra, nw, lang), parseData(reflectances, spectra, nw, lang)];
     const needed = [...LAMPS.map((l) => l.id), ...WINDOWS.flatMap((w) => w.lights.map((l) => l.spd)), 'cie-d65',
                     ...PARTS.flatMap((p) => p.options.flatMap((o) => [o.main, o.joint].filter(Boolean)))];
@@ -488,16 +489,29 @@
     const nameOf = (id) => spectra[id].names[lang];
     const relabel = [];                                           // functions that write the texts of the current language
     const bind = (fn) => { relabel.push(fn); fn(); };
-    const W = E.light_width(), H = E.light_height(), NW = E.light_spectrum_size();
+    const [NW, W, H, ROWS, SWATCH] = new Int32Array(E.memory.buffer, E.demo_constants(), 5);
+    const LIGHTS = 1 + Math.max(...WINDOWS.map((w) => w.lights.length));   // the lamp, then the lights outside
+
+    // Buffers in the module's memory. An allocation may grow the memory, so every typed-array view is created
+    // after all allocations, at the time of use.
+    const alloc = (bytes) => { const p = E.demo_alloc(bytes); if (!p) throw new Error('out of memory'); return p; };
+    const buf = {
+      config: alloc(16), spectra: alloc(3 * NW * 4), frame: alloc(W * H * 4), probe: alloc(2 * NW * 4),
+      rgb: alloc(4), rect: alloc(16), swatch: alloc(SWATCH * SWATCH * 4), created: alloc(4),
+    };
+    new Int32Array(E.memory.buffer, buf.config, 4).set([W, H, ROWS, LIGHTS]);
+    if (E.spl_create(buf.config, buf.created) !== 0) throw new Error('could not create the engine');
+    const engine = new Uint32Array(E.memory.buffer, buf.created, 1)[0], room = E.scene_create(engine);
+    if (!room) throw new Error('could not create the room');
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const phase = Array.from({ length: 8 }, () => Math.random() * 2 * Math.PI);
 
     const put = (slot, v) => {                                    // copies a spectrum into the engine's scratch area; returns its address
-      const at = E.light_scratch() + slot * NW * 4;
+      const at = buf.spectra + slot * NW * 4;
       new Float32Array(E.memory.buffer, at, NW).set(v);
       return at;
     };
-    const rgbOf = (id) => Array.from(new Uint8Array(E.memory.buffer, E.light_source_rgb(put(0, spectra[id].v)), 3));
+    const rgbOf = (id) => { E.spl_light_rgb(put(0, spectra[id].v), buf.rgb); return Array.from(new Uint8Array(E.memory.buffer, buf.rgb, 3)); };
 
     const state = { lamp: 0, window: 1, intensity: 1, ev: 0, me: { x: 88, y: 104 } };
     const lamps = LAMPS.map((L) => ({ ...L, rgb: rgbOf(L.id), shape: peak(spectra[L.id].v) }));
@@ -511,18 +525,18 @@
     const option = (p) => PARTS[p].options[picks[p]];
     function applyPart(p) {
       const o = option(p);
-      E.scene_set_material(p, o.style, put(0, spectra[o.main].v), o.joint ? put(1, spectra[o.joint].v) : 0);
+      E.scene_set_material(room, p, o.style, put(0, spectra[o.main].v), o.joint ? put(1, spectra[o.joint].v) : 0);
     }
-    function applyLamp() { E.light_set_spectrum(0, put(0, spectra[lamps[state.lamp].id].v)); }
+    function applyLamp() { E.spl_light_set_spectrum(engine, 0, put(0, spectra[lamps[state.lamp].id].v)); }
     function applyWindow() {
       const w = windows[state.window];
-      E.scene_set_window(w.lights.length ? 1 : 0);
-      E.scene_build();
-      for (let l = 1; l < E.light_max(); l++) if (!w.lights[l - 1]) E.light_off(l);
-      w.lights.forEach((L, k) => E.light_set_spectrum(k + 1, put(0, spectra[L.spd].v)));
+      E.scene_set_window(room, w.lights.length ? 1 : 0);
+      E.scene_build(room);
+      for (let l = 1; l < LIGHTS; l++) if (!w.lights[l - 1]) E.spl_light_disable(engine, l);
+      w.lights.forEach((L, k) => E.spl_light_set_spectrum(engine, k + 1, put(0, spectra[L.spd].v)));
       applyExposure();
     }
-    function applyExposure() { E.light_set_exposure(2 ** (windows[state.window].ev + state.ev)); }
+    function applyExposure() { E.spl_set_exposure(engine, 2 ** (windows[state.window].ev + state.ev)); }
     function wave(f, t, seed) {                                   // a sum of sines: 1 + amp × a normalized variation
       if (!f || reduceMotion.matches) return 1;
       let s = 0, n = 0;
@@ -533,12 +547,12 @@
       const lamp = lamps[state.lamp], w = windows[state.window];
       const sway = reduceMotion.matches ? 0 : lamp.sway || 0;
       const dx = sway * Math.sin(2 * Math.PI * 0.9 * t + phase[5]), dy = 0.5 * sway * Math.sin(2 * Math.PI * 1.7 * t + phase[6]);
-      E.light_point(0, state.me.x + dx, state.me.y + dy, LAMP_Z, LAMP_INTENSITY * state.intensity * wave(lamp.flicker, t, 0));
+      E.spl_light_set_point(engine, 0, state.me.x + dx, state.me.y + dy, LAMP_Z, LAMP_INTENSITY * state.intensity * wave(lamp.flicker, t, 0));
       const k = wave(w.flicker, t, 3);
       w.lights.forEach((L, j) => {
-        if (L.kind === 'sun') E.light_sun(j + 1, ...L.dir, L.strength * k);
-        else if (L.kind === 'window') E.scene_window_light(j + 1, L.strength * k);
-        else E.light_point(j + 1, ...L.at, L.strength * k);
+        if (L.kind === 'sun') E.spl_light_set_directional(engine, j + 1, ...L.dir, L.strength * k);
+        else if (L.kind === 'window') E.scene_window_light(room, j + 1, L.strength * k);
+        else E.spl_light_set_point(engine, j + 1, ...L.at, L.strength * k);
       });
     }
 
@@ -620,10 +634,10 @@
     // Materials: pick a part in the tabs, then its material. One set of buttons per part, created once.
     function swatch(p, o) {
       const c = el('canvas', { class: 'spl-ico spl-swatch', 'aria-hidden': 'true' });
-      c.width = c.height = 32;
-      const at = E.scene_swatch(p, o.style, put(0, spectra['cie-d65'].v), put(1, spectra[o.main].v), o.joint ? put(2, spectra[o.joint].v) : 0);
-      const ctx = c.getContext('2d'), img = ctx.createImageData(32, 32);
-      img.data.set(new Uint8Array(E.memory.buffer, at, 32 * 32 * 4));
+      c.width = c.height = SWATCH;
+      E.scene_swatch(p, o.style, put(0, spectra['cie-d65'].v), put(1, spectra[o.main].v), o.joint ? put(2, spectra[o.joint].v) : 0, buf.swatch);
+      const ctx = c.getContext('2d'), img = ctx.createImageData(SWATCH, SWATCH);
+      img.data.set(new Uint8Array(E.memory.buffer, buf.swatch, SWATCH * SWATCH * 4));
       ctx.putImageData(img, 0, 0);
       return c;
     }
@@ -643,7 +657,7 @@
           const restyle = option(p).style !== o.style;
           picks[p] = j;
           applyPart(p);
-          if (restyle) E.scene_build();                           // only a new style needs a rebuild; for a new reflectance the engine just recomputes the spectral sums
+          if (restyle) E.scene_build(room);                           // only a new style needs a rebuild; for a new reflectance the engine just recomputes the spectral sums
           press(buttons, j);
           sync();
           shownPart = null;
@@ -709,7 +723,8 @@
     frame.width = W;
     frame.height = H;
     const frameCtx = frame.getContext('2d'), image = frameCtx.createImageData(W, H);
-    const rect = Array.from(new Int32Array(E.memory.buffer, E.scene_window_rect(), 4));   // window opening: x0, y0, x1, y1
+    E.scene_window_rect(buf.rect);
+    const rect = Array.from(new Int32Array(E.memory.buffer, buf.rect, 4));   // window opening: x0, y0, x1, y1
     const outside = el('canvas');
     outside.width = rect[2] - rect[0];
     outside.height = rect[3] - rect[1];
@@ -751,7 +766,7 @@
     }
 
     function drawDot() {                                          // the dot is drawn on the floor at its feet; when hidden, as a translucent dashed circle
-      const x = state.me.x * SCALE, y = state.me.y * SCALE, hidden = E.scene_hidden(state.me.x, state.me.y);
+      const x = state.me.x * SCALE, y = state.me.y * SCALE, hidden = E.scene_hidden(room, state.me.x, state.me.y);
       g.save();
       g.globalAlpha = hidden ? 0.5 : 1;
       g.beginPath();
@@ -768,7 +783,8 @@
     let hover = null;
     function draw(t) {
       placeLights(t);
-      image.data.set(new Uint8Array(E.memory.buffer, E.light_render(), W * H * 4));
+      E.spl_render(engine, buf.frame);
+      image.data.set(new Uint8Array(E.memory.buffer, buf.frame, W * H * 4));
       frameCtx.putImageData(image, 0, 0);
       g.imageSmoothingEnabled = false;
       g.clearRect(0, 0, canvas.width, canvas.height);
@@ -784,8 +800,9 @@
         g.lineWidth = 1;
         g.strokeRect(px * SCALE - 1.5, py * SCALE - 1.5, SCALE + 3, SCALE + 3);
       }
-      showPart(E.scene_part_at(px, py));
-      const s = new Float32Array(E.memory.buffer, E.light_probe(px, py), 2 * NW);
+      showPart(E.scene_part_at(room, px, py));
+      E.spl_probe(engine, px, py, buf.probe, buf.probe + NW * 4);
+      const s = new Float32Array(E.memory.buffer, buf.probe, 2 * NW);
       const incident = s.subarray(0, NW), reflected = s.subarray(NW), m = Math.max(...incident) || 1;
       const k = 4 * (py * W + px), rgb = [image.data[k], image.data[k + 1], image.data[k + 2]];
       probeFig.title.textContent = tr(hover ? UI.probePointer : UI.probeDot);
@@ -798,7 +815,7 @@
     }
 
     // ---- Input
-    const free = (x, y) => [[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([sx, sy]) => !E.scene_blocked(x + sx * RADIUS, y + sy * RADIUS));
+    const free = (x, y) => [[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([sx, sy]) => !E.scene_blocked(room, x + sx * RADIUS, y + sy * RADIUS));
     const keys = new Set();
     let target = null;
     function step(dt) {
