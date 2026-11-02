@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { TILE = 16, MAP_W = SCENE_WIDTH / TILE, MAP_H = SCENE_HEIGHT / TILE };
+enum { TILE = SCENE_TILE, MAP_W = SCENE_MAP_W, MAP_H = SCENE_MAP_H };
 _Static_assert((MAP_W * TILE) == SCENE_WIDTH && (MAP_H * TILE) == SCENE_HEIGHT,
                "the room must be a whole number of tiles");
 
@@ -62,7 +62,7 @@ enum { WIN_X0 = 96, WIN_X1 = 144, WIN_MULLION = 119, FRAME_W = 2 };
 #define WIN_Z1   28.0f
 #define FRAME_DZ 4.0f
 
-/* Map: '#' wall, 'P' pillar, 'c' crate, 'o' barrel, '.' floor. */
+/* The demo room. Map: '#' wall, 'P' pillar, 'c' crate, 'o' barrel, '.' floor. */
 static const char *const MAP[MAP_H] = {
     "################", "#..............#", "#..P......cc...#", "#..........c...#",
     "#....###.......#", "#......#....P..#", "#.o....#.......#", "#.oo........c..#",
@@ -71,6 +71,7 @@ static const char *const MAP[MAP_H] = {
 
 struct scene {
     spl_engine *engine;
+    char map[MAP_H][MAP_W];                          /* layout, one character per tile */
     unsigned char part[SCENE_HEIGHT][SCENE_WIDTH];   /* part standing on each floor point */
     float side_normal[SCENE_HEIGHT][SCENE_WIDTH][2]; /* horizontal normal of the side there */
     unsigned char round[SCENE_HEIGHT][SCENE_WIDTH];  /* the point belongs to a cylinder */
@@ -84,7 +85,7 @@ static void build_world(scene *sc)
 {
     for (int y = 0; y < SCENE_HEIGHT; y++) {
         for (int x = 0; x < SCENE_WIDTH; x++) {
-            char c = MAP[y / TILE][x / TILE];
+            char c = sc->map[y / TILE][x / TILE];
             float u = x % TILE + 0.5f - TILE / 2.0f;
             float v = y % TILE + 0.5f - TILE / 2.0f;
             float r = sqrtf(u * u + v * v);
@@ -596,7 +597,7 @@ scene *scene_create(spl_engine *engine)
     }
     sc->engine = engine;
     sc->window_open = 1;
-    build_world(sc);
+    scene_set_map(sc, NULL);
     return sc;
 }
 
@@ -621,6 +622,26 @@ spl_status scene_set_material(scene *sc, int part, int style, const float body[S
         return st;
     }
     sc->style[part] = style;
+    return SPL_OK;
+}
+
+spl_status scene_set_map(scene *sc, const char *map)
+{
+    if (!sc) {
+        return SPL_ERR_ARGUMENT;
+    }
+    if (map) {
+        size_t tiles = (size_t)MAP_W * MAP_H;
+        if (strlen(map) != tiles || strspn(map, ".#Pco") != tiles) {
+            return SPL_ERR_ARGUMENT;
+        }
+        memcpy(sc->map, map, sizeof sc->map);
+    } else {
+        for (int r = 0; r < MAP_H; r++) {
+            memcpy(sc->map[r], MAP[r], MAP_W);
+        }
+    }
+    build_world(sc);
     return SPL_OK;
 }
 

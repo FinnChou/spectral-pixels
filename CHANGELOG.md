@@ -3,6 +3,14 @@
 All notable changes to this project are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/); while the major version is 0, a minor version may change the interface.
 
+## [Unreleased]
+
+### Added
+
+- Demo: `scene_set_map()` lays out the room from a tile map (`SCENE_MAP_W` × `SCENE_MAP_H` characters), so that a
+  caller can build simpler scenes, for example a bare floor or a floor with a few objects. `NULL` restores the demo
+  room, whose output is unchanged. `render` takes the layout as `map=`, and `make check` covers a custom layout.
+
 ## [0.1.0] - 2026-11-01
 
 First versioned release. The engine becomes a library that other programs can use directly. It replaces the

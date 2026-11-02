@@ -19,6 +19,7 @@
  *     light<N>=sun,spectrum id,dx,dy,dz,illuminance        directional light
  *     light<N>=area,spectrum id,cx,cy,cz,ux,uy,uz,vx,vy,vz,luminance
  *     light<N>=window,spectrum id,luminance                the window opening as an area light
+ *     map=tiles    the room layout, SCENE_MAP_W × SCENE_MAP_H characters (see scene_set_map())
  *     window=0|1   ambient=factor   exposure=linear factor   scale=magnification (integer 1-16)
  *     dot=x,y      draws a marker at that floor point
  *     probe=x,y    prints the incident and reflected spectra at that pixel to standard output,
@@ -272,6 +273,8 @@ int main(int argc, char **argv)
                 fail("light index out of range: ", arg);
             }
             parse_light(engine, room, l, value, arg);
+        } else if (strncmp(arg, "map=", 4) == 0) {
+            check(scene_set_map(room, value), arg);
         } else if (strncmp(arg, "window=", 7) == 0) {
             window = parse_int(value, arg);
             if (window != 0 && window != 1) {

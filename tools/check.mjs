@@ -39,6 +39,7 @@ const LIGHTS = 8;
 // any typed-array view is created, because an allocation may grow the memory.
 const config = E.demo_alloc(16), spectrumBuf = E.demo_alloc(3 * NW * 4), vectors = E.demo_alloc(9 * 4);
 const frame = E.demo_alloc(W * H * 4), probeBuf = E.demo_alloc(2 * NW * 4), created = E.demo_alloc(4);
+const MAP_TILES = 16 * 10, mapBuf = E.demo_alloc(MAP_TILES + 1);
 const SWATCH = new Int32Array(E.memory.buffer, E.demo_constants(), 5)[4];
 const swatchBuf = E.demo_alloc(SWATCH * SWATCH * 4), rgbBuf = E.demo_alloc(4);
 const ok = (status, what) => { if (status !== 0) throw new Error(`${what} failed (${status})`); };
@@ -67,6 +68,8 @@ function renderWasm(c) {
     const [main, joint, style] = c.parts[name];
     ok(E.scene_set_material(room, part, style, put(0, main), joint === '-' ? 0 : put(1, joint)), name);
   });
+  if (c.map) new Uint8Array(E.memory.buffer, mapBuf, MAP_TILES + 1).set([...new TextEncoder().encode(c.map), 0]);
+  ok(E.scene_set_map(room, c.map ? mapBuf : 0), 'map');
   E.scene_set_window(room, c.window);
   E.scene_build(room);
   for (let l = 0; l < LIGHTS; l++) {
@@ -96,7 +99,7 @@ function renderNative(c, dir) {
   const args = [
     ...PARTS.map((name) => `${name}=${c.parts[name].join(',')}`),
     ...c.lights.map((light, l) => `light${l}=${light.join(',')}`),
-    `window=${c.window}`, `ambient=${c.ambient}`, `exposure=${c.exposure}`,
+    ...(c.map ? [`map=${c.map}`] : []), `window=${c.window}`, `ambient=${c.ambient}`, `exposure=${c.exposure}`,
     ...c.probes.map(([x, y]) => `probe=${x},${y}`),
   ];
   const image = join(dir, 'frame.pam');
@@ -132,6 +135,9 @@ const cases = [
   // an area light with an arbitrary orientation; no ambient light
   { ...base, lights: [lamp('cie-led-b5', 120.6, 50.2), ['area', 'cie-daylight-10000', 128, 80, 31, 12, 0, 0, 0, 6, -2, 3]],
     ambient: 0, parts: { ...base.parts, floor: ['KLUM-E405', '-', 6], wall: ['KLUM-B103', 'KLUM-C001', 1] } },
+  // a room laid out with scene_set_map(): no walls, a few objects, a lamp and the sun
+  { ...base, map: '................' + '..c.........P...' + '................' + '.....o..........'.repeat(2) +
+                  '................'.repeat(5), lights: [lamp('cie-a', 60.5, 70.5), ['sun', 'cie-d65', -0.3, 0.4, 0.8, 5]] },
 ];
 
 // The colours the demo draws with: swatches of every part and style under D65 for three materials, the colour
