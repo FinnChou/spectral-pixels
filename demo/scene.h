@@ -26,6 +26,11 @@ extern "C" {
 #define SCENE_WIDTH  256
 #define SCENE_HEIGHT 160
 
+/* The room is laid out on a map of SCENE_MAP_W × SCENE_MAP_H tiles of SCENE_TILE pixels. */
+#define SCENE_TILE  16
+#define SCENE_MAP_W (SCENE_WIDTH / SCENE_TILE)
+#define SCENE_MAP_H (SCENE_HEIGHT / SCENE_TILE)
+
 /* Parts. Part p uses two rows of the reflectance table: 2p for its body and 2p + 1 for its joints
  * (mortar between bricks or stones). */
 enum scene_part {
@@ -73,12 +78,19 @@ SCENE_API void scene_destroy(scene *sc);
 SCENE_API spl_status scene_set_material(scene *sc, int part, int style, const float body[SPL_NW],
                                         const float joint[SPL_NW]);
 
+/* Lays out the room. map holds SCENE_MAP_W × SCENE_MAP_H characters, row by row from the north
+ * (top) edge, one per tile: '#' wall, 'P' pillar, 'c' crate, 'o' barrel, '.' floor. NULL restores
+ * the demo room. The window is cut into the wall tiles of the top row only. Call scene_build()
+ * afterwards. */
+SCENE_API spl_status scene_set_map(scene *sc, const char *map);
+
 /* Opens (1) or closes (0, with shutters) the window in the north wall. Call scene_build()
  * afterwards. */
 SCENE_API void scene_set_window(scene *sc, int open);
 
-/* Fills the engine's surfaces, occluders and ceiling; calls spl_invalidate() if the geometry
- * changed. */
+/* Fills the engine's surfaces, occluders and ceiling (at the height of the walls); calls
+ * spl_invalidate() if the geometry changed. A room open to the sky can remove the ceiling
+ * afterwards with spl_set_ceiling(). */
 SCENE_API void scene_build(scene *sc);
 
 /* Makes a light an area light of the given luminance filling the window opening, a uniformly bright
